@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "pitch_names": "scientific (C4 = middle C = MIDI 60)",
+
+  "low_interval_limits": {
+    "about": "SPEC 5a, as approved in Milestone 2. Checked across the whole sounding texture: for every pair of adjacent distinct sounding pitches, the lower note must be at or above the limit for that interval. Unisons, octaves and compound intervals (wider than an octave) have no limit.",
+    "lowest_allowed_lower_note": {
+      "1": "E3",
+      "2": "Eb3",
+      "3": "C3",
+      "4": "Bb2",
+      "5": "A2",
+      "6": "Bb2",
+      "7": "Bb1",
+      "8": "F2",
+      "9": "F2",
+      "10": "F2",
+      "11": "F2"
+    },
+    "interval_names": {
+      "1": "minor 2nd", "2": "major 2nd", "3": "minor 3rd", "4": "major 3rd", "5": "perfect 4th",
+      "6": "tritone", "7": "perfect 5th", "8": "minor 6th", "9": "major 6th", "10": "minor 7th",
+      "11": "major 7th"
+    }
+  },
+
+  "spacing_max_semitones": 12,
+  "choir_max_leap_semitones": 12,
+  "melody_clash_semitones": [1],
+  "choir_order": ["choir_soprano", "choir_alto", "choir_tenor", "choir_bass"],
+
+  "checks": {
+    "playable_range":   {"severity": "error",   "generator_must_pass": true,  "label": "Note outside playable range"},
+    "comfortable_range": {"severity": "warning", "safe_mode_severity": "error", "generator_must_pass": false, "label": "Note outside comfortable range"},
+    "defining_tone":    {"severity": "error",   "generator_must_pass": true,  "label": "Chord's defining tone missing"},
+    "low_interval":     {"severity": "error",   "generator_must_pass": true,  "label": "Low-interval limit broken"},
+    "spacing":          {"severity": "warning", "generator_must_pass": true,  "label": "Spacing over an octave between adjacent upper voices"},
+    "choir_crossing":   {"severity": "error",   "generator_must_pass": true,  "label": "Choir voice crossing"},
+    "choir_leap":       {"severity": "error",   "generator_must_pass": true,  "label": "Choir leap over an octave"},
+    "parallels":        {"severity": "warning", "generator_must_pass": false, "label": "Parallel 5ths/8ves between independent lines"},
+    "choir_parallels":  {"severity": "error",   "generator_must_pass": true,  "label": "Parallel 5ths/8ves within the choir"},
+    "doubled_outer":    {"severity": "warning", "generator_must_pass": true,  "label": "Doubled leading tone or 7th in an outer voice"},
+    "melody_clash":     {"severity": "warning", "generator_must_pass": false, "label": "Melody note clashes with a harmony note a minor 2nd away"}
+  }
+}

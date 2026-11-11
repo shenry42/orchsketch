@@ -1,0 +1,27 @@
+{
+  "id": "oboe",
+  "name": "Oboe",
+  "short": "Ob",
+  "section": "woodwinds",
+  "order": 3,
+  "playable": ["Bb3", "A6"],
+  "comfortable": ["D4", "D6"],
+  "default_count": 2,
+  "max_divisi": 2,
+  "gm_program": 68,
+  "roles": ["melody", "high_harmony", "mid_harmony"],
+  "registers": [
+    {
+      "range": ["Bb3", "D4"],
+      "note": "thick and coarse, hard to play softly"
+    },
+    {
+      "range": ["D#4", "C6"],
+      "note": "clear, reedy, expressive"
+    },
+    {
+      "range": ["C#6", "A6"],
+      "note": "thin, pinched"
+    }
+  ]
+}

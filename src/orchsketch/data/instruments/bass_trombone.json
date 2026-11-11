@@ -1,0 +1,27 @@
+{
+  "id": "bass_trombone",
+  "name": "Bass trombone",
+  "short": "BTbn",
+  "section": "brass",
+  "order": 12,
+  "playable": ["Bb0", "F5"],
+  "comfortable": ["C2", "F4"],
+  "default_count": 1,
+  "max_divisi": 1,
+  "gm_program": 57,
+  "roles": ["bass", "low_harmony"],
+  "registers": [
+    {
+      "range": ["Bb0", "F2"],
+      "note": "massive, very dark"
+    },
+    {
+      "range": ["F#2", "F3"],
+      "note": "full, dark"
+    },
+    {
+      "range": ["F#3", "F5"],
+      "note": "strained, rarely used"
+    }
+  ]
+}

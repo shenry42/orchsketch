@@ -1,0 +1,31 @@
+{
+  "id": "basses",
+  "name": "Double basses",
+  "short": "Cb",
+  "section": "strings",
+  "order": 18,
+  "playable": ["E1", "G4"],
+  "comfortable": ["E1", "D3"],
+  "default_count": "section",
+  "max_divisi": 2,
+  "gm_program": 48,
+  "roles": ["bass"],
+  "registers": [
+    {
+      "range": ["E1", "B1"],
+      "note": "very deep, adds weight under the cellos"
+    },
+    {
+      "range": ["C2", "G2"],
+      "note": "full, clear foundation"
+    },
+    {
+      "range": ["G#2", "D3"],
+      "note": "lighter"
+    },
+    {
+      "range": ["D#3", "G4"],
+      "note": "thin, exposed"
+    }
+  ]
+}

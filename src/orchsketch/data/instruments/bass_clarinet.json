@@ -1,0 +1,28 @@
+{
+  "id": "bass_clarinet",
+  "name": "Bass clarinet",
+  "short": "BCl",
+  "section": "woodwinds",
+  "order": 6,
+  "playable": ["Bb1", "F5"],
+  "comfortable": ["D2", "F4"],
+  "default_count": 1,
+  "max_divisi": 1,
+  "gm_program": 71,
+  "roles": ["bass", "low_harmony", "pad"],
+  "registers": [
+    {
+      "range": ["Bb1", "Eb3"],
+      "note": "deep, rich, dark"
+    },
+    {
+      "range": ["E3", "Ab3"],
+      "note": "throat tones: thinner"
+    },
+    {
+      "range": ["A3", "F5"],
+      "note": "reedy, lighter"
+    }
+  ],
+  "audition_note": "GM has no bass clarinet: auditions with the clarinet sound. Exported notes are unaffected."
+}

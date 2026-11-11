@@ -1,0 +1,27 @@
+{
+  "id": "choir_tenor",
+  "name": "Choir tenor",
+  "short": "T",
+  "section": "choir",
+  "order": 21,
+  "playable": ["C3", "A4"],
+  "comfortable": ["D3", "F4"],
+  "default_count": "section",
+  "max_divisi": 2,
+  "gm_program": 52,
+  "roles": ["mid_harmony", "low_harmony", "pad", "melody"],
+  "registers": [
+    {
+      "range": ["C3", "C#3"],
+      "note": "weak"
+    },
+    {
+      "range": ["D3", "F4"],
+      "note": "warm"
+    },
+    {
+      "range": ["F#4", "A4"],
+      "note": "ringing, heroic, strained"
+    }
+  ]
+}

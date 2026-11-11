@@ -1,6 +1,6 @@
 import pytest
 
-from orchsketch.theory import Key, note_name, parse_note_name
+from orchsketch.theory import Key, note_name, parse_note_name, parse_pitch
 
 
 def test_middle_c_names():
@@ -36,3 +36,16 @@ def test_minor_scale_includes_raised_seventh():
 def test_bad_mode():
     with pytest.raises(ValueError):
         Key("C", "dorian")
+
+
+@pytest.mark.parametrize("name,pitch", [("C4", 60), ("Bb1", 34), ("B#3", 60), ("Cb4", 59), ("F#5", 78),
+                                        ("C-1", 0), ("E♭3", 51), ("G9", 127)])
+def test_parse_pitch(name, pitch):
+    assert parse_pitch(name) == pitch
+
+
+def test_parse_pitch_ableton_and_errors():
+    assert parse_pitch("C3", "ableton") == 60
+    for bad in ("H4", "C", "Cx4", "G#9", ""):
+        with pytest.raises(ValueError):
+            parse_pitch(bad)

@@ -2,6 +2,33 @@
 
 All notable changes to OrchSketch. Versions follow the milestones in SPEC.md §10.
 
+## v0.2 — Data and checker (Milestone 2) — 2026-11-11
+
+### Added
+- **Instrument data** (`src/orchsketch/data/instruments/*.json`, loader `instruments.py`): the 22 SPEC §4 parts
+  with playable and comfortable ranges (sounding pitch), default count, maximum divisi, GM program for audition,
+  role list and timbre notes per register. Files are validated on load (comfortable inside playable, known
+  section/roles, file name = id) with messages that name the file and field.
+- **Rules data** (`src/orchsketch/data/rules.json`, loader `rules.py`): per-interval low-interval limits,
+  spacing and choir-leap limits, melody-clash interval, and the severity of every check (plus which ones the
+  generator must always pass).
+- **Rule checker** (`checker.py`): runs on plain note lists, no UI. Checks playable and comfortable range,
+  defining chord tones, low-interval limits across the whole texture, spacing within a section, choir crossing,
+  choir leaps, parallel 5ths/8ves (between independent lines; always within the choir), doubled leading tone or
+  7th in an outer voice, and melody minor-2nd clashes. Results list each problem by part, chord and position.
+  Parts can be marked as doubling another part or as sharing a group, so intended doublings aren't flagged.
+- `theory.parse_pitch` ("Bb1" -> 34).
+- **Hand-made examples** (`tests/checker_examples.py`): one case per check, a clean C -> G texture and choir, and
+  two clean full orchestrations (test 1 and test 4).
+- `scripts/checker_report.bat`: runs the checker on the examples and writes `checker_report.txt`.
+
+### Changed (approved by Sam, range cross-check)
+- Playable tops: English horn C6 -> A5, contrabassoon F3 -> C4, trumpet D6 -> C6, bass trombone Bb4 -> F5,
+  violins I and II A7 -> E7, choir soprano C6 -> A5, choir bass E4 -> C4.
+- Low-interval limits: SPEC's two-line rule is replaced by one limit per interval (m2 E3, M2 Eb3, m3 C3, M3 Bb2,
+  P4 A2, tritone Bb2, P5 Bb1, 6ths and 7ths F2).
+- Severities: choir parallels are errors; in safe mode a note outside comfortable range is an error.
+
 ## v0.1 — Read and label (Milestone 1) — 2026-11-11
 
 ### Added

@@ -1,0 +1,27 @@
+{
+  "id": "choir_soprano",
+  "name": "Choir soprano",
+  "short": "S",
+  "section": "choir",
+  "order": 19,
+  "playable": ["C4", "A5"],
+  "comfortable": ["E4", "G5"],
+  "default_count": "section",
+  "max_divisi": 2,
+  "gm_program": 52,
+  "roles": ["melody", "high_harmony", "pad"],
+  "registers": [
+    {
+      "range": ["C4", "D#4"],
+      "note": "weak, breathy"
+    },
+    {
+      "range": ["E4", "G5"],
+      "note": "full, comfortable"
+    },
+    {
+      "range": ["G#5", "A5"],
+      "note": "bright, loud, strained"
+    }
+  ]
+}

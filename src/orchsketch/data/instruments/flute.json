@@ -1,0 +1,27 @@
+{
+  "id": "flute",
+  "name": "Flute",
+  "short": "Fl",
+  "section": "woodwinds",
+  "order": 2,
+  "playable": ["C4", "C7"],
+  "comfortable": ["E4", "A6"],
+  "default_count": 2,
+  "max_divisi": 2,
+  "gm_program": 73,
+  "roles": ["melody", "high_harmony", "pad"],
+  "registers": [
+    {
+      "range": ["C4", "F4"],
+      "note": "breathy and dark, easily covered"
+    },
+    {
+      "range": ["F#4", "C6"],
+      "note": "clear, flexible core"
+    },
+    {
+      "range": ["C#6", "C7"],
+      "note": "bright, penetrating"
+    }
+  ]
+}

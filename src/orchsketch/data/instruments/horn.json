@@ -1,0 +1,31 @@
+{
+  "id": "horn",
+  "name": "French horn",
+  "short": "Hn",
+  "section": "brass",
+  "order": 9,
+  "playable": ["B1", "F5"],
+  "comfortable": ["F2", "D5"],
+  "default_count": 4,
+  "max_divisi": 4,
+  "gm_program": 60,
+  "roles": ["melody", "mid_harmony", "low_harmony", "pad"],
+  "registers": [
+    {
+      "range": ["B1", "E2"],
+      "note": "very dark, slow to speak"
+    },
+    {
+      "range": ["F2", "E3"],
+      "note": "dark, rich, mysterious"
+    },
+    {
+      "range": ["F3", "F4"],
+      "note": "heroic: the heart of the horn"
+    },
+    {
+      "range": ["F#4", "F5"],
+      "note": "bright, brassy, strenuous"
+    }
+  ]
+}

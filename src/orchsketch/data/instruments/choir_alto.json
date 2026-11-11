@@ -1,0 +1,27 @@
+{
+  "id": "choir_alto",
+  "name": "Choir alto",
+  "short": "A",
+  "section": "choir",
+  "order": 20,
+  "playable": ["F3", "F5"],
+  "comfortable": ["A3", "C5"],
+  "default_count": "section",
+  "max_divisi": 2,
+  "gm_program": 52,
+  "roles": ["mid_harmony", "pad"],
+  "registers": [
+    {
+      "range": ["F3", "G#3"],
+      "note": "dark, chesty"
+    },
+    {
+      "range": ["A3", "C5"],
+      "note": "warm core"
+    },
+    {
+      "range": ["C#5", "F5"],
+      "note": "strained"
+    }
+  ]
+}

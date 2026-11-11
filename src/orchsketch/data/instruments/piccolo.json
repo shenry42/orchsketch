@@ -1,0 +1,27 @@
+{
+  "id": "piccolo",
+  "name": "Piccolo",
+  "short": "Picc",
+  "section": "woodwinds",
+  "order": 1,
+  "playable": ["D5", "C8"],
+  "comfortable": ["A5", "A7"],
+  "default_count": 1,
+  "max_divisi": 1,
+  "gm_program": 72,
+  "roles": ["melody", "high_harmony"],
+  "registers": [
+    {
+      "range": ["D5", "B5"],
+      "note": "weak and hollow, easily covered"
+    },
+    {
+      "range": ["C6", "B6"],
+      "note": "clear and sweet"
+    },
+    {
+      "range": ["C7", "C8"],
+      "note": "brilliant, piercing"
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "id": "bassoon",
+  "name": "Bassoon",
+  "short": "Bn",
+  "section": "woodwinds",
+  "order": 7,
+  "playable": ["Bb1", "E5"],
+  "comfortable": ["C2", "Bb4"],
+  "default_count": 2,
+  "max_divisi": 2,
+  "gm_program": 70,
+  "roles": ["bass", "low_harmony", "mid_harmony", "melody"],
+  "registers": [
+    {
+      "range": ["Bb1", "F2"],
+      "note": "dark, reedy, strong"
+    },
+    {
+      "range": ["F#2", "Bb3"],
+      "note": "smooth, warm"
+    },
+    {
+      "range": ["B3", "E5"],
+      "note": "plaintive, tense"
+    }
+  ]
+}

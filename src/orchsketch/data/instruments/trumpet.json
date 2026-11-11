@@ -1,0 +1,31 @@
+{
+  "id": "trumpet",
+  "name": "Trumpet (Bb)",
+  "short": "Tpt",
+  "section": "brass",
+  "order": 10,
+  "playable": ["E3", "C6"],
+  "comfortable": ["G3", "G5"],
+  "default_count": 3,
+  "max_divisi": 3,
+  "gm_program": 56,
+  "roles": ["melody", "high_harmony", "mid_harmony"],
+  "registers": [
+    {
+      "range": ["E3", "F#3"],
+      "note": "dull, less brilliant"
+    },
+    {
+      "range": ["G3", "C5"],
+      "note": "full, noble"
+    },
+    {
+      "range": ["C#5", "G5"],
+      "note": "brilliant, heroic"
+    },
+    {
+      "range": ["G#5", "C6"],
+      "note": "strained, piercing"
+    }
+  ]
+}

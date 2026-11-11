@@ -1,0 +1,28 @@
+{
+  "id": "contrabassoon",
+  "name": "Contrabassoon",
+  "short": "Cbn",
+  "section": "woodwinds",
+  "order": 8,
+  "playable": ["Bb0", "C4"],
+  "comfortable": ["D1", "C3"],
+  "default_count": 1,
+  "max_divisi": 1,
+  "gm_program": 70,
+  "roles": ["bass"],
+  "registers": [
+    {
+      "range": ["Bb0", "E1"],
+      "note": "buzzy, deep growl"
+    },
+    {
+      "range": ["F1", "E2"],
+      "note": "full, solid sub-bass"
+    },
+    {
+      "range": ["F2", "C4"],
+      "note": "weak, thin"
+    }
+  ],
+  "audition_note": "GM has no contrabassoon: auditions with the bassoon sound. Exported notes are unaffected."
+}

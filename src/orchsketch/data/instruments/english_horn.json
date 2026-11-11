@@ -1,0 +1,27 @@
+{
+  "id": "english_horn",
+  "name": "English horn",
+  "short": "EH",
+  "section": "woodwinds",
+  "order": 4,
+  "playable": ["E3", "A5"],
+  "comfortable": ["G3", "G5"],
+  "default_count": 1,
+  "max_divisi": 1,
+  "gm_program": 69,
+  "roles": ["melody", "mid_harmony"],
+  "registers": [
+    {
+      "range": ["E3", "A3"],
+      "note": "dark and rich"
+    },
+    {
+      "range": ["Bb3", "C5"],
+      "note": "mellow, plaintive"
+    },
+    {
+      "range": ["C#5", "A5"],
+      "note": "thinner, more effort"
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "id": "choir_bass",
+  "name": "Choir bass",
+  "short": "B",
+  "section": "choir",
+  "order": 22,
+  "playable": ["E2", "C4"],
+  "comfortable": ["G2", "C4"],
+  "default_count": "section",
+  "max_divisi": 2,
+  "gm_program": 52,
+  "roles": ["bass", "low_harmony", "pad"],
+  "registers": [
+    {
+      "range": ["E2", "F#2"],
+      "note": "deep but weak in volume"
+    },
+    {
+      "range": ["G2", "C4"],
+      "note": "resonant core"
+    }
+  ]
+}

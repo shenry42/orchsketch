@@ -1,0 +1,27 @@
+{
+  "id": "violas",
+  "name": "Violas",
+  "short": "Vla",
+  "section": "strings",
+  "order": 16,
+  "playable": ["C3", "E6"],
+  "comfortable": ["C3", "G5"],
+  "default_count": "section",
+  "max_divisi": 3,
+  "gm_program": 48,
+  "roles": ["mid_harmony", "low_harmony", "pad", "melody"],
+  "registers": [
+    {
+      "range": ["C3", "G3"],
+      "note": "C string: dark, sonorous"
+    },
+    {
+      "range": ["G#3", "A4"],
+      "note": "veiled, warm"
+    },
+    {
+      "range": ["A#4", "E6"],
+      "note": "A string: nasal, intense"
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "id": "violins_1",
+  "name": "Violins I",
+  "short": "Vln1",
+  "section": "strings",
+  "order": 14,
+  "playable": ["G3", "E7"],
+  "comfortable": ["G3", "A6"],
+  "default_count": "section",
+  "max_divisi": 3,
+  "gm_program": 48,
+  "roles": ["melody", "high_harmony", "pad"],
+  "registers": [
+    {
+      "range": ["G3", "D4"],
+      "note": "G string: dark, rich"
+    },
+    {
+      "range": ["D#4", "E5"],
+      "note": "warm, singing"
+    },
+    {
+      "range": ["F5", "A6"],
+      "note": "brilliant"
+    },
+    {
+      "range": ["A#6", "E7"],
+      "note": "thin, exposed, intonation risk"
+    }
+  ]
+}

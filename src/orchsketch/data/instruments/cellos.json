@@ -1,0 +1,31 @@
+{
+  "id": "cellos",
+  "name": "Cellos",
+  "short": "Vc",
+  "section": "strings",
+  "order": 17,
+  "playable": ["C2", "A5"],
+  "comfortable": ["C2", "A4"],
+  "default_count": "section",
+  "max_divisi": 3,
+  "gm_program": 48,
+  "roles": ["bass", "low_harmony", "melody", "pad"],
+  "registers": [
+    {
+      "range": ["C2", "G2"],
+      "note": "deep, sonorous"
+    },
+    {
+      "range": ["G#2", "A3"],
+      "note": "warm, full"
+    },
+    {
+      "range": ["A#3", "A4"],
+      "note": "singing, passionate"
+    },
+    {
+      "range": ["A#4", "A5"],
+      "note": "intense, strained"
+    }
+  ]
+}

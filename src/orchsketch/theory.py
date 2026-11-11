@@ -35,6 +35,32 @@ def parse_note_name(name: str) -> int:
     return (LETTER_PC[name[0].upper()] + ACCIDENTAL_SHIFT[acc]) % 12
 
 
+def parse_pitch(name: str, style: str = "scientific") -> int:
+    """'Bb1' -> 34 (scientific, C4 = 60). With style='ableton', 'C3' -> 60.
+
+    The octave belongs to the letter, so 'B#3' is 60 and 'Cb4' is 59.
+    """
+    s = name.strip().replace("♯", "#").replace("♭", "b")
+    i = 1
+    while i < len(s) and s[i] in "#b":
+        i += 1
+    letter, acc, octave_txt = s[:1], s[1:i], s[i:]
+    if letter.upper() not in LETTER_PC or acc not in ACCIDENTAL_SHIFT:
+        raise ValueError(f"not a pitch name: {name!r}")
+    try:
+        octave = int(octave_txt)
+    except ValueError:
+        raise ValueError(f"not a pitch name: {name!r}") from None
+    if style == "ableton":
+        octave += 1
+    elif style != "scientific":
+        raise ValueError(style)
+    pitch = (octave + 1) * 12 + LETTER_PC[letter.upper()] + ACCIDENTAL_SHIFT[acc]
+    if not 0 <= pitch <= 127:
+        raise ValueError(f"pitch out of MIDI range: {name!r}")
+    return pitch
+
+
 def _spell(letter: str, pc: int) -> str:
     diff = (pc - LETTER_PC[letter]) % 12
     if diff > 6:

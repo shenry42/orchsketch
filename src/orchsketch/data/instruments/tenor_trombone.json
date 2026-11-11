@@ -1,0 +1,27 @@
+{
+  "id": "tenor_trombone",
+  "name": "Tenor trombone",
+  "short": "Tbn",
+  "section": "brass",
+  "order": 11,
+  "playable": ["E2", "F5"],
+  "comfortable": ["G2", "Bb4"],
+  "default_count": 2,
+  "max_divisi": 2,
+  "gm_program": 57,
+  "roles": ["low_harmony", "mid_harmony", "melody"],
+  "registers": [
+    {
+      "range": ["E2", "F3"],
+      "note": "dark, weighty"
+    },
+    {
+      "range": ["F#3", "F4"],
+      "note": "noble, full"
+    },
+    {
+      "range": ["F#4", "F5"],
+      "note": "brilliant, strenuous"
+    }
+  ]
+}
