@@ -42,4 +42,9 @@ if (-not (Test-Path $sf)) {
         Invoke-WebRequest -Uri $it.download_url -OutFile (Join-Path $sfDir $it.name) -UseBasicParsing -Headers $headers
     }
 } else { Write-Output 'SoundFont already present' }
+$lic = Join-Path $sfDir 'LICENSE.txt'
+if (-not (Test-Path $lic)) {
+    Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/mrbumpy409/GeneralUser-GS/main/documentation/LICENSE.txt' -OutFile $lic -UseBasicParsing -Headers $headers
+    Write-Output 'SoundFont licence saved'
+}
 Write-Output ("SoundFont size: {0:N1} MB" -f ((Get-Item $sf).Length / 1MB))

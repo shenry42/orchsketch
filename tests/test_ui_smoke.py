@@ -84,3 +84,57 @@ def test_clicking_a_cell_opens_menu_without_errors(app, monkeypatch):
         assert w.selected == i
     assert len(opened) == 4 and not errors, errors
     w.close()
+
+
+def test_generate_grid_play_mute_export(app, tmp_path):
+    """Milestone 3: confirm, generate, grid, piano roll, playback (silent backend), mute/solo, export."""
+    from test_player import FakeBackend
+
+    from orchsketch.playback.player import Player
+
+    notes = []
+    w = MainWindow()
+    w.notify = lambda title, text: notes.append((title, text))
+    w.open_folder = lambda path: None
+    w.export_root = tmp_path
+    w.player_factory = lambda: Player(FakeBackend)
+    w.set_key("A", "minor")
+    assert w.load(DATA / "01_epic_staple.mid")
+    assert not w.generate_btn.isEnabled()
+    assert w.generate() is None and "Confirm" in notes[-1][0]
+    w.confirm_all()
+    assert w.generate_btn.isEnabled()
+    orch = w.generate()
+    assert orch is not None and w.orch is orch
+    assert w.grid.rowCount() == len(orch.lines) == 31
+    assert w.grid.columnCount() == 3 + 4
+    assert w.checker_label.text() == "Checker: no problems."
+    assert w.reason_label.text().startswith("A · Low and warm")
+    cell = w.grid.item(w.grid.line_ids.index("vc"), 3).text()
+    assert cell == "A1"  # cellos on A2 (scientific) = A1 in Ableton names
+    w.grid.select_part("vc")
+    assert w.piano.title == "Cellos" and w.piano.notes
+
+    assert w.play() and w.player.playing
+    w.player._tick()
+    w.grid.mute_buttons["vc"].setChecked(True)
+    assert not w.player.seq.audible("vc")
+    w.section_solo["brass"].setChecked(True)
+    assert w.player.seq.audible("hn1") and not w.player.seq.audible("vla")
+    w.stop()
+    assert not w.player.playing and w.player.seq.sounding() == {}
+
+    files = w.export_parts_action()
+    assert len(files) == sum(1 for p in orch.parts if p.notes)
+    assert all(f.parent == tmp_path / "01_epic_staple" for f in files)
+    assert {f.name for f in w.files_for_part("vln1-a")} == {"01_epic_staple_Vln1-a_A.mid"}
+
+    # sections off -> fewer parts; changing a chord or the key clears the result
+    w.section_boxes["choir"].setChecked(False)
+    w.section_boxes["woodwinds"].setChecked(False)
+    orch2 = w.generate()
+    assert {ln.instrument for ln in orch2.lines}.isdisjoint({"flute", "choir_bass"})
+    w.set_key("C", "major")
+    assert w.orch is None and not w.play_btn.isEnabled()
+    w.close()
+    assert w.player.backend is None

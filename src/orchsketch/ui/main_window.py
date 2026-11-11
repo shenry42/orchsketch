@@ -1,23 +1,31 @@
-"""Milestone 1 main window: load a chord clip, review/correct labels, re-export.
+"""Main window: load a chord clip, review/correct labels, generate, audition and export.
 
-Later milestones add the instrument grid, sliders, playback and orchestration export.
+Milestone 3 adds section toggles, Generate, the part grid, the piano-roll preview, playback and per-part
+export. Later milestones add alternatives, locks, sliders and presets.
 """
 from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QSettings, Qt, QTimer
-from PySide6.QtGui import QAction, QActionGroup, QCursor, QKeySequence
+from PySide6.QtCore import QPoint, QSettings, Qt, QTimer, QUrl
+from PySide6.QtGui import QAction, QActionGroup, QCursor, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
-    QComboBox, QFileDialog, QHBoxLayout, QInputDialog, QLabel, QMainWindow, QMenu, QMessageBox,
-    QPushButton, QSpinBox, QTextEdit, QVBoxLayout, QWidget,
+    QApplication, QCheckBox, QComboBox, QFileDialog, QHBoxLayout, QInputDialog, QLabel, QMainWindow, QMenu,
+    QMessageBox, QPushButton, QSpinBox, QSplitter, QTextEdit, QToolButton, QVBoxLayout, QWidget,
 )
 
 from .. import __version__
 from ..analysis import AnalysisSession, ChordLabel, SymbolError, parse_symbol
+from ..checker import chords_from_session
+from ..export import EXPORT_ROOT, export_folder, export_part, export_parts
+from ..generator import Ensemble, GenerationError, Orchestration, generate
+from ..instruments import SECTIONS, instruments
 from ..midi_io import InputError, read_chord_file, write_notes
+from ..playback.player import Player
+from ..playback.synth import SynthError
 from ..theory import MAJOR_TONICS, MINOR_TONICS, Key, note_name
 from .chord_strip import ChordStrip, length_text
+from .grid import DragHandle, PartGrid, PianoRoll
 from .theme import MUTED
 
 DOCS = Path.home() / "Documents" / "OrchSketch"
@@ -27,13 +35,22 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"OrchSketch {__version__}")
-        self.resize(1200, 560)
+        self.resize(1280, 820)
         self.setAcceptDrops(True)
         self.settings = QSettings("OrchSketch", "OrchSketch")
         self.name_style = self.settings.value("note_names", "ableton")
         self.session: AnalysisSession | None = None
         self.selected: int | None = None
+        self.orch: Orchestration | None = None
+        self.player: Player | None = None
+        self.player_factory = Player  # tests replace this with a silent backend
+        self.muted: set[str] = set()
+        self.soloed: set[str] = set()
+        self.export_root = EXPORT_ROOT
         self._build()
+        self.playhead = QTimer(self)
+        self.playhead.setInterval(50)
+        self.playhead.timeout.connect(self._update_playhead)
 
     # ------------------------------------------------------------------ layout
     def _build(self):
@@ -56,10 +73,22 @@ class MainWindow(QMainWindow):
         self.tempo.setRange(20, 300)
         self.tempo.setValue(140)
         self.tempo.setSuffix(" BPM")
+        self.tempo.valueChanged.connect(self._tempo_changed)
         self.confirm_btn = QPushButton("Confirm all")
         self.confirm_btn.clicked.connect(self.confirm_all)
-        self.export_btn = QPushButton("Export MIDI…")
-        self.export_btn.clicked.connect(self.export_dialog)
+        self.section_boxes: dict[str, QCheckBox] = {}
+        for sec in SECTIONS:
+            cb = QCheckBox(sec.capitalize())
+            cb.setChecked(True)
+            cb.setToolTip(f"Include the {sec} in the orchestration")
+            self.section_boxes[sec] = cb
+        self.seed = QSpinBox()
+        self.seed.setRange(1, 9999)
+        self.seed.setValue(1)
+        self.seed.setToolTip("Same chords, sections and seed always give the same result")
+        self.generate_btn = QPushButton("Generate")
+        self.generate_btn.setStyleSheet("QPushButton { font-weight: 600; }")
+        self.generate_btn.clicked.connect(self.generate)
         for w in (self.open_btn, self.file_label):
             bar.addWidget(w)
         bar.addStretch(1)
@@ -69,7 +98,12 @@ class MainWindow(QMainWindow):
             bar.addWidget(w)
         bar.addSpacing(16)
         bar.addWidget(self.confirm_btn)
-        bar.addWidget(self.export_btn)
+        bar.addSpacing(16)
+        for cb in self.section_boxes.values():
+            bar.addWidget(cb)
+        bar.addWidget(QLabel("Seed"))
+        bar.addWidget(self.seed)
+        bar.addWidget(self.generate_btn)
         root.addLayout(bar)
 
         self.strip = ChordStrip()
@@ -87,7 +121,58 @@ class MainWindow(QMainWindow):
 
         self.details = QTextEdit()
         self.details.setReadOnly(True)
-        root.addWidget(self.details, 1)
+        self.grid = PartGrid(self.files_for_part)
+        self.grid.part_selected.connect(self.show_part)
+        self.grid.mute_toggled.connect(self.set_mute)
+        self.grid.solo_toggled.connect(self.set_solo)
+        self.piano = PianoRoll()
+        split = QSplitter(Qt.Vertical)
+        split.addWidget(self.grid)
+        split.addWidget(self.piano)
+        split.addWidget(self.details)
+        split.setSizes([420, 120, 90])
+        root.addWidget(split, 1)
+
+        tr = QHBoxLayout()
+        self.play_btn = QPushButton("▶ Play")
+        self.play_btn.clicked.connect(self.toggle_play)
+        self.loop_box = QCheckBox("Loop")
+        self.loop_box.setChecked(True)
+        self.loop_box.toggled.connect(self._loop_changed)
+        tr.addWidget(self.play_btn)
+        tr.addWidget(self.loop_box)
+        tr.addSpacing(16)
+        self.section_mute: dict[str, QToolButton] = {}
+        self.section_solo: dict[str, QToolButton] = {}
+        for sec in SECTIONS:
+            tr.addWidget(QLabel(sec.capitalize()))
+            for kind, store, color in (("M", self.section_mute, "#e0a040"), ("S", self.section_solo, "#60c060")):
+                b = QToolButton()
+                b.setText(kind)
+                b.setCheckable(True)
+                b.setToolTip(f"{'Mute' if kind == 'M' else 'Solo'} the {sec}")
+                b.setStyleSheet(f"QToolButton:checked {{ background: {color}; color: #111; }}")
+                b.toggled.connect(lambda on, s=sec, k=kind: self.set_section(s, k, on))
+                store[sec] = b
+                tr.addWidget(b)
+            tr.addSpacing(8)
+        tr.addStretch(1)
+        self.all_handle = DragHandle(self.files_for_all, "⠿ All", "Drag every part into Ableton")
+        self.all_handle.setStyleSheet("padding: 4px 10px; border: 1px solid #555; border-radius: 4px;")
+        self.export_parts_btn = QPushButton("Export parts")
+        self.export_parts_btn.setToolTip("Save one MIDI file per part to Documents\\OrchSketch\\Exports")
+        self.export_parts_btn.clicked.connect(self.export_parts_action)
+        tr.addWidget(self.all_handle)
+        tr.addWidget(self.export_parts_btn)
+        root.addLayout(tr)
+        self.checker_label = QLabel("")
+        self.reason_label = QLabel("")
+        self.reason_label.setStyleSheet(f"color: {MUTED};")
+        info = QHBoxLayout()
+        info.addWidget(self.checker_label)
+        info.addSpacing(20)
+        info.addWidget(self.reason_label, 1)
+        root.addLayout(info)
         self.setCentralWidget(central)
         self.status_label = QLabel("")
         self.statusBar().addWidget(self.status_label, 1)
@@ -97,7 +182,9 @@ class MainWindow(QMainWindow):
     def _menus(self):
         m = self.menuBar().addMenu("&File")
         for text, slot, sc in (("&Open chords…", self.open_dialog, QKeySequence.Open),
-                               ("&Export MIDI…", self.export_dialog, QKeySequence("Ctrl+E")),
+                               ("&Generate", self.generate, QKeySequence("Ctrl+G")),
+                               ("Export &parts", self.export_parts_action, QKeySequence("Ctrl+E")),
+                               ("&Re-export input clip…", self.export_dialog, QKeySequence("Ctrl+Shift+E")),
                                ("&Quit", self.close, QKeySequence.Quit)):
             a = QAction(text, self)
             a.setShortcut(sc)
@@ -115,7 +202,7 @@ class MainWindow(QMainWindow):
         h = self.menuBar().addMenu("&Help")
         a = QAction("&About", self)
         a.triggered.connect(lambda: QMessageBox.about(
-            self, "OrchSketch", f"OrchSketch {__version__}\nMilestone 1: read and label."))
+            self, "OrchSketch", f"OrchSketch {__version__}\nMilestone 3: first orchestration."))
         h.addAction(a)
 
     def _fill_tonics(self, current: str):
@@ -148,6 +235,7 @@ class MainWindow(QMainWindow):
     def _key_changed(self, *_):
         if self.session:
             self.session.set_key(self.key())
+            self.clear_orchestration("The key changed - press Generate again.")
         self._refresh()
 
     # ------------------------------------------------------------------ files
@@ -165,6 +253,7 @@ class MainWindow(QMainWindow):
             return False
         self.session = AnalysisSession(clip, self.key())
         self.selected = None
+        self.clear_orchestration()
         self.file_label.setText(f"{Path(path).name}  ·  {clip.bars} bars")
         self.file_label.setStyleSheet("")
         self._refresh()
@@ -250,6 +339,7 @@ class MainWindow(QMainWindow):
 
     def apply_label(self, index: int, label: ChordLabel):
         self.session.correct(index, label)
+        self.clear_orchestration("A chord changed - press Generate again.")
         self._refresh()
 
     def type_chord_dialog(self, index: int):
@@ -272,6 +362,7 @@ class MainWindow(QMainWindow):
 
     def revert(self, index: int):
         self.session.revert(index)
+        self.clear_orchestration("A chord changed - press Generate again.")
         self._refresh()
 
     def confirm_all(self):
@@ -286,14 +377,21 @@ class MainWindow(QMainWindow):
     def set_name_style(self, style: str):
         self.name_style = style
         self.settings.setValue("note_names", style)
+        if self.orch is not None:
+            self.grid.show_orchestration(self.orch, self.key(), style)
         self._refresh()
 
     # ------------------------------------------------------------------ display
     def _refresh(self):
         key = self.key()
         has = self.session is not None
-        self.export_btn.setEnabled(has)
         self.confirm_btn.setEnabled(has)
+        ready = has and self.session.all_confirmed and bool(self.session.chord_results)
+        self.generate_btn.setEnabled(ready)
+        self.generate_btn.setToolTip("Orchestrate the confirmed chords" if ready
+                                     else "Confirm every chord first (Confirm all)")
+        for w in (self.play_btn, self.export_parts_btn, self.all_handle):
+            w.setEnabled(self.orch is not None)
         self.strip.show_results(self.session.results if has else [], key, self.selected)
         self.details.setHtml(self._details_html(key))
         if has:
@@ -331,3 +429,187 @@ class MainWindow(QMainWindow):
                 rows.append("Alternatives: " + ", ".join(f"{a.symbol(key)} · {a.roman(key)}"
                                                          for a in r.alternatives))
         return "<br>".join(rows)
+
+    # ------------------------------------------------------------------ messages (replaceable in tests)
+    def notify(self, title: str, text: str):
+        QMessageBox.information(self, title, text)
+
+    def open_folder(self, path: Path):
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+
+    # ------------------------------------------------------------------ generate
+    def active_sections(self) -> frozenset[str]:
+        return frozenset(s for s, cb in self.section_boxes.items() if cb.isChecked())
+
+    def generate(self) -> Orchestration | None:
+        if not self.session:
+            self.notify("Nothing to orchestrate", "Open a chord file first.")
+            return None
+        if not self.session.all_confirmed:
+            self.notify("Confirm the chords first",
+                        "Generation only uses confirmed chords. Click Confirm all (or confirm each chord).")
+            return None
+        secs = self.active_sections()
+        if not secs:
+            self.notify("No sections", "Tick at least one section (woodwinds, brass, strings or choir).")
+            return None
+        chords = chords_from_session(self.session)
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            orch = generate(chords, self.key(), seed=self.seed.value(), ensemble=Ensemble(secs))
+        except GenerationError as exc:
+            QApplication.restoreOverrideCursor()
+            self.notify("Couldn't orchestrate", str(exc))
+            return None
+        QApplication.restoreOverrideCursor()
+        self.stop()
+        self.orch = orch
+        self.muted, self.soloed = set(), set()
+        for b in list(self.section_mute.values()) + list(self.section_solo.values()):
+            b.blockSignals(True)
+            b.setChecked(False)
+            b.blockSignals(False)
+        self.grid.show_orchestration(orch, self.key(), self.name_style)
+        if self.player is not None and self.player.seq is not None:
+            self._load_player()
+        self.checker_label.setText(orch.report.summary())
+        self.reason_label.setText(f"A · {orch.reason}")
+        self.piano.clear_part()
+        self.grid.select_part(orch.lines[0].id)
+        self._refresh()
+        return orch
+
+    def clear_orchestration(self, message: str | None = None):
+        if self.orch is None:
+            self.grid.clear_grid()
+            return
+        self.stop()
+        self.orch = None
+        self.grid.clear_grid(message or "Confirm the chords, then press Generate.")
+        self.piano.clear_part()
+        self.checker_label.setText("")
+        self.reason_label.setText("")
+        if self.player is not None:
+            self.player.seq = None
+
+    def show_part(self, line_id: str):
+        if not self.orch:
+            return
+        ln = self.orch.line(line_id)
+        self.piano.set_part(ln.label, self.orch.part(line_id).notes, self.session.clip.length,
+                            [c.start for c in self.orch.chords], self.name_style)
+
+    # ------------------------------------------------------------------ playback
+    def _load_player(self):
+        insts = instruments()
+        parts = [(ln.id, insts[ln.instrument].gm_program, list(self.orch.part(ln.id).notes)) for ln in self.orch.lines]
+        sections = {ln.id: insts[ln.instrument].section for ln in self.orch.lines}
+        self.player.loop = self.loop_box.isChecked()
+        self.player.set_bpm(self.tempo.value())
+        self.player.load(parts, self.session.clip.length, sections)
+        for pid in self.muted:
+            self.player.seq.set_mute(pid, True)
+        for pid in self.soloed:
+            self.player.seq.set_solo(pid, True)
+
+    def play(self) -> bool:
+        if not self.orch:
+            return False
+        try:
+            if self.player is None:
+                self.player = self.player_factory()
+                self.player.on_stopped = self._playback_ended
+            if self.player.seq is None:
+                self._load_player()
+        except SynthError as exc:
+            self.player = None
+            self.notify("No audio", str(exc))
+            return False
+        self.player.play()
+        self.play_btn.setText("■ Stop")
+        self.playhead.start()
+        return True
+
+    def stop(self):
+        if self.player is not None:
+            self.player.stop()
+        self.play_btn.setText("▶ Play")
+        if hasattr(self, "playhead"):
+            self.playhead.stop()
+        self.piano.set_position(None)
+
+    def toggle_play(self):
+        if self.player is not None and self.player.playing:
+            self.stop()
+        else:
+            self.play()
+
+    def _playback_ended(self):
+        self.stop()
+
+    def _update_playhead(self):
+        if self.player is not None and self.player.seq is not None and self.player.playing:
+            self.piano.set_position(self.player.seq.pos)
+
+    def _tempo_changed(self, bpm):
+        if self.player is not None:
+            self.player.set_bpm(bpm)
+
+    def _loop_changed(self, on):
+        if self.player is not None:
+            self.player.loop = on
+
+    def set_mute(self, line_id: str, on: bool):
+        (self.muted.add if on else self.muted.discard)(line_id)
+        if self.player is not None and self.player.seq is not None:
+            self.player.seq.set_mute(line_id, on)
+
+    def set_solo(self, line_id: str, on: bool):
+        (self.soloed.add if on else self.soloed.discard)(line_id)
+        if self.player is not None and self.player.seq is not None:
+            self.player.seq.set_solo(line_id, on)
+
+    def set_section(self, section: str, kind: str, on: bool):
+        """Section mute/solo: toggles the row buttons of every part in that section."""
+        if not self.orch:
+            return
+        insts = instruments()
+        buttons = self.grid.mute_buttons if kind == "M" else self.grid.solo_buttons
+        for ln in self.orch.lines:
+            if insts[ln.instrument].section == section and ln.id in buttons:
+                buttons[ln.id].setChecked(on)
+
+    # ------------------------------------------------------------------ export
+    def project_name(self) -> str:
+        return Path(self.session.clip.source_path).stem if self.session else "OrchSketch"
+
+    def parts_folder(self) -> Path:
+        return export_folder(self.project_name(), self.export_root)
+
+    def files_for_part(self, line_id: str) -> list[Path]:
+        if not self.orch:
+            return []
+        p = export_part(self.orch, line_id, self.parts_folder(), self.project_name(), self.tempo.value(),
+                        self.session.clip.length)
+        return [p] if p else []
+
+    def files_for_all(self) -> list[Path]:
+        if not self.orch:
+            return []
+        return export_parts(self.orch, self.parts_folder(), self.project_name(), self.tempo.value(),
+                            self.session.clip.length)
+
+    def export_parts_action(self) -> list[Path]:
+        if not self.orch:
+            self.notify("Nothing to export", "Generate an orchestration first.")
+            return []
+        files = self.files_for_all()
+        folder = self.parts_folder()
+        self.statusBar().showMessage(f"Exported {len(files)} parts to {folder}", 15000)
+        self.open_folder(folder)
+        return files
+
+    def closeEvent(self, e):  # noqa: N802
+        if self.player is not None:
+            self.player.close()
+        super().closeEvent(e)
