@@ -1,0 +1,95 @@
+{
+  "test": 8,
+  "file": "08_two_per_bar.mid",
+  "key": {
+    "tonic": "C",
+    "mode": "minor"
+  },
+  "bars": 8,
+  "chords": [
+    {
+      "start_beat": 0.0,
+      "beats": 2,
+      "label": "Cm",
+      "roman": "i"
+    },
+    {
+      "start_beat": 2.0,
+      "beats": 2,
+      "label": "Ab",
+      "roman": "VI"
+    },
+    {
+      "start_beat": 4.0,
+      "beats": 2,
+      "label": "Bb",
+      "roman": "VII"
+    },
+    {
+      "start_beat": 6.0,
+      "beats": 2,
+      "label": "Cm",
+      "roman": "i"
+    },
+    {
+      "start_beat": 8.0,
+      "beats": 2.5,
+      "label": "Ab",
+      "roman": "VI"
+    },
+    {
+      "start_beat": 10.5,
+      "beats": 1.5,
+      "label": "Eb",
+      "roman": "III"
+    },
+    {
+      "start_beat": 12.0,
+      "beats": 4,
+      "label": "Bb",
+      "roman": "VII"
+    },
+    {
+      "start_beat": 16.0,
+      "beats": 1.5,
+      "label": "Cm",
+      "roman": "i"
+    },
+    {
+      "start_beat": 17.5,
+      "beats": 2.5,
+      "label": "Ab",
+      "roman": "VI"
+    },
+    {
+      "start_beat": 20.0,
+      "beats": 2,
+      "label": "Fm",
+      "roman": "iv"
+    },
+    {
+      "start_beat": 22.0,
+      "beats": 2,
+      "label": "G",
+      "roman": "V"
+    },
+    {
+      "start_beat": 24.0,
+      "beats": 3,
+      "label": "Ab",
+      "roman": "VI"
+    },
+    {
+      "start_beat": 27.0,
+      "beats": 1,
+      "label": "Bb",
+      "roman": "VII"
+    },
+    {
+      "start_beat": 28.0,
+      "beats": 4,
+      "label": "Cm",
+      "roman": "i"
+    }
+  ]
+}

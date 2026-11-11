@@ -1,0 +1,37 @@
+{
+  "test": 4,
+  "file": "04_harmonic_minor_v.mid",
+  "key": {
+    "tonic": "E",
+    "mode": "minor"
+  },
+  "bars": 4,
+  "chords": [
+    {
+      "start_beat": 0.0,
+      "beats": 4,
+      "label": "Em",
+      "roman": "i"
+    },
+    {
+      "start_beat": 4.0,
+      "beats": 4,
+      "label": "C",
+      "roman": "VI"
+    },
+    {
+      "start_beat": 8.0,
+      "beats": 4,
+      "label": "Am",
+      "roman": "iv"
+    },
+    {
+      "start_beat": 12.0,
+      "beats": 4,
+      "label": "B",
+      "roman": "V"
+    }
+  ],
+  "melody_file": "04_harmonic_minor_v.melody.mid",
+  "bass_file": "04_harmonic_minor_v.bass.mid"
+}

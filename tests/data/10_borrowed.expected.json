@@ -1,0 +1,35 @@
+{
+  "test": 10,
+  "file": "10_borrowed.mid",
+  "key": {
+    "tonic": "C",
+    "mode": "major"
+  },
+  "bars": 4,
+  "chords": [
+    {
+      "start_beat": 0.0,
+      "beats": 4,
+      "label": "C",
+      "roman": "I"
+    },
+    {
+      "start_beat": 4.0,
+      "beats": 4,
+      "label": "Fm",
+      "roman": "iv"
+    },
+    {
+      "start_beat": 8.0,
+      "beats": 4,
+      "label": "Ab",
+      "roman": "bVI"
+    },
+    {
+      "start_beat": 12.0,
+      "beats": 4,
+      "label": "G",
+      "roman": "V"
+    }
+  ]
+}

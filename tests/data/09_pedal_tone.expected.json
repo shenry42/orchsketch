@@ -1,0 +1,39 @@
+{
+  "test": 9,
+  "file": "09_pedal_tone.mid",
+  "key": {
+    "tonic": "C",
+    "mode": "minor"
+  },
+  "bars": 4,
+  "chords": [
+    {
+      "start_beat": 0.0,
+      "beats": 4,
+      "label": "Cm",
+      "roman": "i",
+      "pedal": true
+    },
+    {
+      "start_beat": 4.0,
+      "beats": 4,
+      "label": "Ab/C",
+      "roman": "VI6",
+      "pedal": true
+    },
+    {
+      "start_beat": 8.0,
+      "beats": 4,
+      "label": "Bb/C",
+      "roman": "VII/C",
+      "pedal": true
+    },
+    {
+      "start_beat": 12.0,
+      "beats": 4,
+      "label": "Cm",
+      "roman": "i",
+      "pedal": true
+    }
+  ]
+}

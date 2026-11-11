@@ -1,0 +1,157 @@
+{
+  "test": 11,
+  "file": "11_sixteen_bars.mid",
+  "key": {
+    "tonic": "A",
+    "mode": "minor"
+  },
+  "bars": 16,
+  "chords": [
+    {
+      "start_beat": 0.0,
+      "beats": 4,
+      "label": "Am",
+      "roman": "i"
+    },
+    {
+      "start_beat": 4.0,
+      "beats": 4,
+      "label": "F",
+      "roman": "VI"
+    },
+    {
+      "start_beat": 8.0,
+      "beats": 2,
+      "label": "C",
+      "roman": "III"
+    },
+    {
+      "start_beat": 10.0,
+      "beats": 2,
+      "label": "G",
+      "roman": "VII"
+    },
+    {
+      "start_beat": 12.0,
+      "beats": 4,
+      "label": "Am",
+      "roman": "i"
+    },
+    {
+      "start_beat": 16.0,
+      "beats": 4,
+      "label": "Dm/F",
+      "roman": "iv6"
+    },
+    {
+      "start_beat": 20.0,
+      "beats": 4,
+      "label": "E7",
+      "roman": "V7"
+    },
+    {
+      "start_beat": 24.0,
+      "beats": 2,
+      "label": "F",
+      "roman": "VI"
+    },
+    {
+      "start_beat": 26.0,
+      "beats": 2,
+      "label": "G",
+      "roman": "VII"
+    },
+    {
+      "start_beat": 28.0,
+      "beats": 4,
+      "label": "Am",
+      "roman": "i"
+    },
+    {
+      "start_beat": 32.0,
+      "beats": 2,
+      "label": "Dm",
+      "roman": "iv"
+    },
+    {
+      "start_beat": 34.0,
+      "beats": 2,
+      "label": "Dm/F",
+      "roman": "iv6"
+    },
+    {
+      "start_beat": 36.0,
+      "beats": 2,
+      "label": "E",
+      "roman": "V"
+    },
+    {
+      "start_beat": 38.0,
+      "beats": 2,
+      "label": "E7",
+      "roman": "V7"
+    },
+    {
+      "start_beat": 40.0,
+      "beats": 3,
+      "label": "Am",
+      "roman": "i"
+    },
+    {
+      "start_beat": 43.0,
+      "beats": 1,
+      "label": "G",
+      "roman": "VII"
+    },
+    {
+      "start_beat": 44.0,
+      "beats": 4,
+      "label": "F",
+      "roman": "VI"
+    },
+    {
+      "start_beat": 48.0,
+      "beats": 2,
+      "label": "Dm7",
+      "roman": "iv7"
+    },
+    {
+      "start_beat": 50.0,
+      "beats": 2,
+      "label": "E7",
+      "roman": "V7"
+    },
+    {
+      "start_beat": 52.0,
+      "beats": 1.5,
+      "label": "Am",
+      "roman": "i"
+    },
+    {
+      "start_beat": 53.5,
+      "beats": 2.5,
+      "label": "F",
+      "roman": "VI"
+    },
+    {
+      "start_beat": 56.0,
+      "beats": 2,
+      "label": "Bm7b5",
+      "roman": "iiø7"
+    },
+    {
+      "start_beat": 58.0,
+      "beats": 2,
+      "label": "E7",
+      "roman": "V7"
+    },
+    {
+      "start_beat": 60.0,
+      "beats": 4,
+      "label": "Am",
+      "roman": "i"
+    }
+  ],
+  "melody_file": "11_sixteen_bars.melody.mid",
+  "bass_file": "11_sixteen_bars.bass.mid"
+}

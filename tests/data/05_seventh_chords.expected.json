@@ -1,0 +1,29 @@
+{
+  "test": 5,
+  "file": "05_seventh_chords.mid",
+  "key": {
+    "tonic": "F",
+    "mode": "major"
+  },
+  "bars": 4,
+  "chords": [
+    {
+      "start_beat": 0.0,
+      "beats": 4,
+      "label": "Gm7",
+      "roman": "ii7"
+    },
+    {
+      "start_beat": 4.0,
+      "beats": 4,
+      "label": "C7",
+      "roman": "V7"
+    },
+    {
+      "start_beat": 8.0,
+      "beats": 8,
+      "label": "Fmaj7",
+      "roman": "Imaj7"
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "test": 6,
+  "file": "06_inversions.mid",
+  "key": {
+    "tonic": "G",
+    "mode": "major"
+  },
+  "bars": 4,
+  "chords": [
+    {
+      "start_beat": 0.0,
+      "beats": 4,
+      "label": "G",
+      "roman": "I"
+    },
+    {
+      "start_beat": 4.0,
+      "beats": 4,
+      "label": "D/F#",
+      "roman": "V6"
+    },
+    {
+      "start_beat": 8.0,
+      "beats": 4,
+      "label": "Em",
+      "roman": "vi"
+    },
+    {
+      "start_beat": 12.0,
+      "beats": 4,
+      "label": "C/E",
+      "roman": "IV6"
+    }
+  ]
+}

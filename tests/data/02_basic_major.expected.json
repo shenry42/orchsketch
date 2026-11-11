@@ -1,0 +1,35 @@
+{
+  "test": 2,
+  "file": "02_basic_major.mid",
+  "key": {
+    "tonic": "C",
+    "mode": "major"
+  },
+  "bars": 4,
+  "chords": [
+    {
+      "start_beat": 0.0,
+      "beats": 4,
+      "label": "C",
+      "roman": "I"
+    },
+    {
+      "start_beat": 4.0,
+      "beats": 4,
+      "label": "G",
+      "roman": "V"
+    },
+    {
+      "start_beat": 8.0,
+      "beats": 4,
+      "label": "Am",
+      "roman": "vi"
+    },
+    {
+      "start_beat": 12.0,
+      "beats": 4,
+      "label": "F",
+      "roman": "IV"
+    }
+  ]
+}

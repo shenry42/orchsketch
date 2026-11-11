@@ -1,0 +1,59 @@
+{
+  "test": 12,
+  "file": "12_power_and_ambiguous.mid",
+  "key": {
+    "tonic": "A",
+    "mode": "minor"
+  },
+  "bars": 7,
+  "chords": [
+    {
+      "start_beat": 0.0,
+      "beats": 4,
+      "label": "A5",
+      "roman": "i5"
+    },
+    {
+      "start_beat": 4.0,
+      "beats": 4,
+      "label": "F5",
+      "roman": "VI5"
+    },
+    {
+      "start_beat": 8.0,
+      "beats": 4,
+      "label": "C5",
+      "roman": "III5"
+    },
+    {
+      "start_beat": 12.0,
+      "beats": 4,
+      "label": "G5",
+      "roman": "VII5"
+    },
+    {
+      "start_beat": 16.0,
+      "beats": 4,
+      "label": "Am7",
+      "roman": "i7",
+      "also_in_alternatives": [
+        "C6/A"
+      ]
+    },
+    {
+      "start_beat": 20.0,
+      "beats": 4,
+      "label": "C6",
+      "roman": "IIIadd6",
+      "also_in_alternatives": [
+        "Am7/C"
+      ]
+    },
+    {
+      "start_beat": 24.0,
+      "beats": 4,
+      "label": "Bm7b5",
+      "roman": "iiø7"
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "test": 3,
+  "file": "03_natural_minor.mid",
+  "key": {
+    "tonic": "D",
+    "mode": "minor"
+  },
+  "bars": 4,
+  "chords": [
+    {
+      "start_beat": 0.0,
+      "beats": 4,
+      "label": "Dm",
+      "roman": "i"
+    },
+    {
+      "start_beat": 4.0,
+      "beats": 4,
+      "label": "Gm",
+      "roman": "iv"
+    },
+    {
+      "start_beat": 8.0,
+      "beats": 4,
+      "label": "Am",
+      "roman": "v"
+    },
+    {
+      "start_beat": 12.0,
+      "beats": 4,
+      "label": "Dm",
+      "roman": "i"
+    }
+  ]
+}

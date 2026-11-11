@@ -1,0 +1,21 @@
+# environment and downloads (setup.bat recreates them)
+.venv/
+vendor/
+# build outputs
+build/
+dist/
+releases/
+*.spec
+# local logs and scratch
+__pycache__/
+*.pyc
+.pytest_cache/
+_sync/
+prereqs.txt
+setup_log.txt
+test_results.txt
+spike_audio_log.txt
+# app data the app writes into Documents\OrchSketch (= this repo folder)
+Exports/
+Projects/
+logs/

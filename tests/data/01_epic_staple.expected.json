@@ -1,0 +1,37 @@
+{
+  "test": 1,
+  "file": "01_epic_staple.mid",
+  "key": {
+    "tonic": "A",
+    "mode": "minor"
+  },
+  "bars": 4,
+  "chords": [
+    {
+      "start_beat": 0.0,
+      "beats": 4,
+      "label": "Am",
+      "roman": "i"
+    },
+    {
+      "start_beat": 4.0,
+      "beats": 4,
+      "label": "F",
+      "roman": "VI"
+    },
+    {
+      "start_beat": 8.0,
+      "beats": 4,
+      "label": "C",
+      "roman": "III"
+    },
+    {
+      "start_beat": 12.0,
+      "beats": 4,
+      "label": "G",
+      "roman": "VII"
+    }
+  ],
+  "melody_file": "01_epic_staple.melody.mid",
+  "bass_file": "01_epic_staple.bass.mid"
+}
