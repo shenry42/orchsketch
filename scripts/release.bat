@@ -12,7 +12,11 @@ if errorlevel 1 goto testfail
 git rev-parse -q --verify "refs/tags/v%VER%" >nul && goto tagexists
 echo [2/4] Committing and tagging...
 git add -A
-if exist build\commit_msg.txt (git commit -q -F build\commit_msg.txt) else (git commit -q -m "OrchSketch v%VER%")
+REM build\commit_msg.txt is used only if it starts with "vX.Y:" for this version, then deleted (never reused).
+set "MSGOK="
+if exist build\commit_msg.txt findstr /b /c:"v%VER%:" build\commit_msg.txt >nul && set "MSGOK=1"
+if defined MSGOK (git commit -q -F build\commit_msg.txt) else (git commit -q -m "OrchSketch v%VER%")
+if exist build\commit_msg.txt del build\commit_msg.txt
 git tag -a "v%VER%" -m "OrchSketch v%VER%"
 if errorlevel 1 goto gitfail
 echo [3/4] Pushing to GitHub (a sign-in window may open the first time)...

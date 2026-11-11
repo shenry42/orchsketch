@@ -2,6 +2,39 @@
 
 All notable changes to OrchSketch. Versions follow the milestones in SPEC.md §10.
 
+## v0.3 — First orchestration (Milestone 3) — 2026-11-11
+
+### Added
+- **Generator** (`generator.py`, no UI code): orchestrates the confirmed chords in safe mode (labelled chord
+  tones only, comfortable range only) as approach A, "low and warm": a close mid-register chord in four upper
+  voices (strings with Violins I divisi, horns, upper woodwinds and choir doubling at the unison), the bass in
+  octaves (cellos, basses, bassoon, contrabassoon, bass trombone, tuba, choir bass) and open 5ths in low brass and
+  bassoon under root-position chords. Every candidate voicing is checked by the rule checker on its own, then a
+  seeded voice-leading search picks one per chord (common tones held, small steps, smooth top voice, contrary
+  motion, parallels avoided; choir leaps over an octave and choir parallels never allowed). The final result is
+  checked again and is only returned with no errors and no `generator_must_pass` warnings. Same chords, key,
+  sections and seed always give the same result.
+- Notes sustain for the chord's length; a note common to two consecutive identical chords is tied through.
+- Section toggles (woodwinds, brass, strings, choir) and a seed field until presets and sliders arrive (Milestone 4).
+  Dynamics fixed at mf: velocity 80 and CC1 80.
+- **Grid**: one row per part, one column per chord (width follows the chord's length), notes in Ableton or
+  scientific names, "~" for a note held from the previous identical chord, yellow = outside comfortable range,
+  red = rule error. Each row has mute, solo and a drag handle. Checker summary and the one-line reason underneath.
+- **Piano-roll preview** of the selected part, with a playhead.
+- **Playback** (`playback/player.py`): FluidSynth + GeneralUser GS through WASAPI shared mode, play/stop, loop,
+  live tempo, mute and solo per part and per section. Parts share one MIDI channel per GM program.
+- **Per-part export** (`export.py`): one type-0 file per part line (divisi lines separate), concert pitch,
+  480 PPQ, 4/4, tempo, CC1 80 at the start, bar 1 with no lead-in, the clip's full length. Named
+  `{Project}_{Part}_A.mid` in `Documents\OrchSketch\Exports\{Project}\`. "Export parts" saves them all;
+  dragging a row handle or "All" drags the files out (into Ableton).
+- `scripts\sound_check.bat`: plays every audition sound for a quick ear check.
+- Tests: the generator on all 12 test files (several seeds, all 15 section combinations), export round trip,
+  playback logic with a silent backend, and the new window features off-screen.
+
+### Changed
+- Setup now also saves the GeneralUser GS licence (`vendor\soundfonts\LICENSE.txt`).
+- File menu: "Export MIDI" is now "Re-export input clip" (Ctrl+Shift+E); Ctrl+E exports the parts.
+
 ## v0.2 — Data and checker (Milestone 2) — 2026-11-11
 
 ### Added
