@@ -9,7 +9,7 @@ A header like "Am · B" means that chord uses alternative B's voicing.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QMimeData, QPoint, QRectF, Qt, QUrl, Signal
+from PySide6.QtCore import QMimeData, QPoint, QPointF, QRectF, Qt, QUrl, Signal
 from PySide6.QtGui import QBrush, QColor, QDrag, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QHeaderView, QLabel, QTableWidget, QTableWidgetItem, QToolButton, QWidget,
@@ -264,11 +264,23 @@ class PianoRoll(QWidget):
         self.title = ""
         self.name_style = "ableton"
         self.position: int | None = None
+        self.key = None
 
-    def set_part(self, title: str, notes, length: int, chord_starts, name_style="ableton"):
+    def set_part(self, title: str, notes, length: int, chord_starts, name_style="ableton", key=None):
         self.title, self.notes, self.length = title, list(notes), max(length, 1)
-        self.chord_starts, self.name_style = list(chord_starts), name_style
+        self.chord_starts, self.name_style, self.key = list(chord_starts), name_style, key
         self.update()
+
+    def labels(self) -> list[tuple[object, str]]:
+        """(note, name) for the notes that get their name written on them: every note whose pitch differs
+        from the note before, or that comes after a rest of more than a beat (repeated notes aren't labelled
+        again)."""
+        out, prev = [], None
+        for n in sorted(self.notes, key=lambda n: (n.start, -n.pitch)):
+            if prev is None or n.pitch != prev.pitch or n.start > prev.end + BAR // 4:
+                out.append((n, note_name(n.pitch, self.name_style, self.key)))
+            prev = n
+        return out
 
     def clear_part(self):
         self.set_part("", [], BAR, [])
@@ -310,6 +322,22 @@ class PianoRoll(QWidget):
         for n in self.notes:
             p.drawRoundedRect(QRectF(left + n.start * sx + 1, y(n.pitch) - nh / 2, max(2.0, n.length * sx - 2), nh),
                               2, 2)
+        # note names (v1.0): on the note when it is tall enough, else just above it; never overlapping
+        font = p.font()
+        font.setPointSizeF(max(7.0, font.pointSizeF() - 1.5))
+        p.setFont(font)
+        fm = p.fontMetrics()
+        inside = nh >= fm.height() - 2
+        p.setPen(QColor("#0d1b2a") if inside else QColor("#cfd8e3"))
+        placed: list[tuple[float, float, float]] = []  # (x0, x1, y) of names already written
+        for n, text in self.labels():
+            x = left + n.start * sx + 3
+            ty = y(n.pitch) + fm.ascent() / 2 - 1 if inside else y(n.pitch) - nh / 2 - 2
+            x1 = x + fm.horizontalAdvance(text)
+            if any(abs(ty - py) < fm.height() and x < px1 + 4 and px0 < x1 + 4 for px0, px1, py in placed):
+                continue
+            p.drawText(QPointF(x, ty), text)
+            placed.append((x, x1, ty))
         if self.position is not None:
             p.setPen(QPen(QColor("#e6e6e6"), 1))
             x = int(left + self.position * sx)

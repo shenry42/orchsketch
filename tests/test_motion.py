@@ -169,6 +169,7 @@ def test_dynamics_per_section_set_velocity_and_cc1(tmp_path):
 
 
 # ---------------------------------------------------------------- moderate mode
+@pytest.mark.slow  # skipped by run_tests.bat; release.bat runs it
 def test_moderate_mode_in_every_approach(progression):
     chords, key = progression
     insts = instruments()
@@ -254,6 +255,7 @@ def test_test_files_with_melody_and_bass_are_1_4_and_11():
     assert [e.name.split("_")[0] for e in WITH_FILES] == ["01", "04", "11"]
 
 
+@pytest.mark.slow  # skipped by run_tests.bat; release.bat runs it
 @pytest.mark.parametrize("exp", WITH_FILES, ids=lambda p: p.name.split(".")[0])
 def test_melody_and_bass_in_every_preset_and_approach(exp):
     chords, key = load(exp)
@@ -293,8 +295,11 @@ def _check_melody_and_bass(o, chords, mel, bass):
         if lid in (MELODY_ID, DOUBLE_ID):
             continue
         notes = o.part(lid).notes
-        assert [n.start for n in notes] == [n.start for n in bass if n.start < end], lid
-        assert [n.pitch % 12 for n in notes] == [n.pitch % 12 for n in bass if n.start < end], lid
+        file_at = {n.start: n.pitch for n in bass if n.start < end}
+        assert all(n.start in file_at and n.pitch % 12 == file_at[n.start] % 12 for n in notes), lid
+        if len(notes) < len(file_at):  # v1.0: only an octave-below line rests on notes it can't reach, and it
+            offsets = {n.pitch - file_at[n.start] for n in notes}  # never jumps an octave on its own
+            assert len(offsets) == 1 and min(offsets) < 0, (lid, offsets)
 
 
 @pytest.mark.parametrize("exp", WITH_FILES, ids=lambda p: p.name.split(".")[0])
@@ -341,11 +346,13 @@ def test_bass_lines_double_the_file_in_octaves():
     o = generate(chords, key, seed=1, settings=Settings(bass=bass))
     vc, cb = o.part("vc").notes, o.part("cb").notes
     assert [n.pitch for n in vc] == [n.pitch for n in bass]
-    # basses an octave under the cellos, except notes below their range (C1), which move up an octave
-    assert all(a.pitch - b.pitch in (0, 12) for a, b in zip(vc, cb)) and sum(a.pitch - b.pitch == 12 for a, b in zip(vc, cb)) >= 6
+    # basses an octave under the cellos; v1.0: a note they can't reach there rests instead of jumping up
+    on = {n.start: n.pitch for n in vc}
+    assert all(on[n.start] - n.pitch == 12 for n in cb) and len(cb) >= 6
     assert o.meta["info"]["bass"] == "file" and "bass line from your file" in o.reason
 
 
+@pytest.mark.slow  # skipped by run_tests.bat; release.bat runs it
 @pytest.mark.parametrize("exp", [EXPECTED[0], EXPECTED[7], EXPECTED[10]], ids=lambda p: p.name.split(".")[0])
 def test_walking_bass_file_with_passing_tones(exp):
     chords, key = load(exp)
@@ -358,6 +365,7 @@ def test_walking_bass_file_with_passing_tones(exp):
 
 
 # ---------------------------------------------------------------- independent bass (moderate only)
+@pytest.mark.slow  # skipped by run_tests.bat; release.bat runs it
 def test_independent_bass(progression):
     chords, key = progression
     scale = key.scale_pcs()
@@ -428,3 +436,38 @@ def test_regenerate_does_not_cycle_back(exp):
         o = regenerate(o)
         assert not must_fix(o.report)
     assert len(set(seen)) == 8
+
+
+# ---------------------------------------------------------------- v1.0 test-set fixes
+@pytest.mark.parametrize("approach", APPROACHES)
+def test_low_bass_lines_keep_the_file_shape(approach):
+    """v1.0 (Sam's ear test, test 11 + files): tuba, basses and contrabassoon play the bass file an octave down
+    and rest on the notes they can't reach there, instead of jumping up an octave on their own notes."""
+    chords, key = load(EXPECTED[10])
+    mel, bass = files_for(EXPECTED[10])
+    o = generate(chords, key, seed=1, approach=approach, settings=Settings(melody=mel, bass=bass))
+    assert not must_fix(o.report, set(o.meta["fixed"]))
+    file_at = {n.start: n.pitch for n in bass}
+    for lid in ("cb", "tba", "cbn"):
+        if lid not in o.cells or not o.part(lid).notes:
+            continue
+        offsets = {n.pitch - file_at[n.start] for n in o.part(lid).notes if n.start in file_at}
+        assert len(offsets) == 1, (lid, offsets)  # one octave for the whole line: never a jump of its own
+
+
+def test_melody_in_a_choir_voice_is_a_choir_voice():
+    """v1.0 (Sam): a melody given to the choir altos counts as a choir voice in the search (no parallels with
+    the other choir parts), and clashes only between your own melody and bass files are shown, not refused."""
+    for exp in WITH_FILES:
+        chords, key = load(exp)
+        mel, bass = files_for(exp)
+        for b in (None, bass):
+            st = Settings(melody=mel, bass=b, melody_instrument="choir_alto", character="moderate")
+            for a in APPROACHES:
+                o = generate(chords, key, seed=1, approach=a, settings=st)
+                assert o.part(MELODY_ID).notes and o.line("mel").instrument == "choir_alto"
+                assert not must_fix(o.report, set(o.meta["fixed"])), (exp.name, a, b is not None)
+    chords, key = load(EXPECTED[10])
+    mel, _ = files_for(EXPECTED[10])
+    with pytest.raises(GenerationError, match="choir bass can't go low enough.*Moderate"):
+        generate(chords, key, seed=1, settings=Settings(melody=mel, melody_instrument="choir_alto"))

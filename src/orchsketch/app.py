@@ -29,6 +29,9 @@ def _install_error_log():
 
 
 def main() -> int:
+    if "--self-check" in sys.argv:  # packaged-build check (Milestone 6): no window
+        from .selfcheck import main as self_check
+        return self_check(sys.argv)
     from PySide6.QtWidgets import QApplication
 
     from .ui.main_window import MainWindow
@@ -39,8 +42,9 @@ def main() -> int:
     app.setApplicationName("OrchSketch")
     apply_dark_theme(app)
     win = MainWindow()
-    if len(sys.argv) > 1:
-        win.load(sys.argv[1])
+    args = [a for a in sys.argv[1:] if not a.startswith("-")]
+    if args:  # a .mid or .osk file (e.g. double-clicked)
+        win.load(args[0])
     win.show()
     return app.exec()
 

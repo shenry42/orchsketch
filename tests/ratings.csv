@@ -11,3 +11,57 @@ test,alternative,score,reason,app_version
 11,A,4,"Melody + bass files: everything works; patterns fairly generic, room for improvement",0.5
 11,B,4,"Melody + bass files: everything works; patterns fairly generic, room for improvement",0.5
 11,C,4,"Melody + bass files: everything works; patterns fairly generic, room for improvement",0.5
+1,A,5,"Full test-set pass (Full epic, seed 1)",1.0-rc1
+1,B,5,"Full test-set pass (Full epic, seed 1)",1.0-rc1
+1,C,5,"Full test-set pass (Full epic, seed 1)",1.0-rc1
+1,A,5,Melody + bass files,1.0-rc1
+1,B,5,Melody + bass files,1.0-rc1
+1,C,5,Melody + bass files,1.0-rc1
+2,A,5,,1.0-rc1
+2,B,5,,1.0-rc1
+2,C,5,,1.0-rc1
+3,A,5,,1.0-rc1
+3,B,5,,1.0-rc1
+3,C,5,,1.0-rc1
+4,A,5,,1.0-rc1
+4,B,5,,1.0-rc1
+4,C,5,,1.0-rc1
+4,A,5,Melody + bass files,1.0-rc1
+4,B,5,Melody + bass files,1.0-rc1
+4,C,5,Melody + bass files,1.0-rc1
+5,A,5,,1.0-rc1
+5,B,5,,1.0-rc1
+5,C,5,,1.0-rc1
+6,A,5,,1.0-rc1
+6,B,5,,1.0-rc1
+6,C,5,,1.0-rc1
+7,A,5,,1.0-rc1
+7,B,5,,1.0-rc1
+7,C,5,,1.0-rc1
+8,A,5,,1.0-rc1
+8,B,5,,1.0-rc1
+8,C,5,,1.0-rc1
+9,A,5,Pedal tone; would like to pick which instrument plays the pedal (Phase 2 idea),1.0-rc1
+9,B,5,Pedal tone; would like to pick which instrument plays the pedal (Phase 2 idea),1.0-rc1
+9,C,5,Pedal tone; would like to pick which instrument plays the pedal (Phase 2 idea),1.0-rc1
+10,A,5,,1.0-rc1
+10,B,5,,1.0-rc1
+10,C,5,,1.0-rc1
+11,A,5,,1.0-rc1
+11,B,5,,1.0-rc1
+11,C,5,,1.0-rc1
+11,A,1,Melody + bass files: the tuba played a different bass line from the other bass instruments (octave jumps); fixed in 1.0,1.0-rc1
+11,B,1,Melody + bass files: the tuba played a different bass line from the other bass instruments (octave jumps); fixed in 1.0,1.0-rc1
+11,C,1,Melody + bass files: the tuba played a different bass line from the other bass instruments (octave jumps); fixed in 1.0,1.0-rc1
+12,A,5,"Sam scored 3 because it is only 7 bars, 'would be 5s' if that's the test file's length: it is (7 bars by design)",1.0-rc1
+12,B,5,"Sam scored 3 because it is only 7 bars, 'would be 5s' if that's the test file's length: it is (7 bars by design)",1.0-rc1
+12,C,5,"Sam scored 3 because it is only 7 bars, 'would be 5s' if that's the test file's length: it is (7 bars by design)",1.0-rc1
+1,A,5,"Melody + bass files, re-test after the low-bass fix",1.0
+1,B,5,"Melody + bass files, re-test after the low-bass fix",1.0
+1,C,5,"Melody + bass files, re-test after the low-bass fix",1.0
+4,A,5,"Melody + bass files, re-test after the low-bass fix",1.0
+4,B,5,"Melody + bass files, re-test after the low-bass fix",1.0
+4,C,5,"Melody + bass files, re-test after the low-bass fix",1.0
+11,A,5,"Melody + bass files, re-test after the low-bass fix (tuba now follows the line)",1.0
+11,B,5,"Melody + bass files, re-test after the low-bass fix (tuba now follows the line)",1.0
+11,C,5,"Melody + bass files, re-test after the low-bass fix (tuba now follows the line)",1.0

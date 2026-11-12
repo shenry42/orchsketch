@@ -953,11 +953,18 @@ class _Fixed:
         return {lid: _fig_end(p, self.figures[lid][i] if lid in self.figures else None)
                 for lid, p in self.at(i).items()}
 
+    @property
+    def choir_ids(self) -> set[str]:
+        """Fixed lines sung by the choir: its own lines, and a melody given to a choir voice (line "mel")."""
+        return {ln.id for ln in self.lines if ln.id in CHOIR_IDS or ln.instrument in CHOIR_INSTRUMENTS.values()}
+
     def choir_at(self, i: int) -> dict[str, int]:
-        return {lid: p for lid, p in self.at(i).items() if lid in CHOIR_IDS}
+        ids = self.choir_ids
+        return {lid: p for lid, p in self.at(i).items() if lid in ids}
 
     def choir_end_at(self, i: int) -> dict[str, int]:
-        return {lid: p for lid, p in self.end_at(i).items() if lid in CHOIR_IDS}
+        ids = self.choir_ids
+        return {lid: p for lid, p in self.end_at(i).items() if lid in ids}
 
     def notes(self, line_id: str, i: int, span: ChordSpan, velocity: int) -> list[Note]:
         fig = self.figures[line_id][i] if line_id in self.figures else None
@@ -1067,11 +1074,13 @@ class _Solver:
             else:
                 pa_, pb_ = a.ch, b.ch
             ch = [lid for lid in pa_ if lid in pb_]
+            # problems only between your own fixed parts (melody, bass file, locks) are shown, not refused
+            mine = set(fa or {}) | set(fb or {})
             for lid in ch:
-                if abs(pb_[lid] - pa_[lid]) > 12:
+                if lid not in mine and abs(pb_[lid] - pa_[lid]) > 12:
                     return None
             for x, y in itertools.combinations(ch, 2):
-                if _parallel(pa_[x], pb_[x], pa_[y], pb_[y]):
+                if not (x in mine and y in mine) and _parallel(pa_[x], pb_[x], pa_[y], pb_[y]):
                     return None
         av, bv = a.vd, b.vd
         cost = 0.0
@@ -1277,6 +1286,15 @@ def generate(chords: list[ChordSpan], key: Key, *, seed: int = 1, ensemble: Ense
             break
         except GenerationError as exc:
             first = first or exc
+    iid = settings.melody_instrument if has_melody else None
+    if iid is not None and str(first).startswith("These chords can't be connected"):
+        insts = instruments or builtin_instruments()
+        if iid in insts and insts[iid].section == "choir":
+            raise GenerationError(
+                f"The rest of the choir can't sing around your melody in the {insts[iid].name} without "
+                "breaking a choir rule (parallel unisons/octaves or a leap over an octave), usually because "
+                "the choir bass can't go low enough. Try Character: Moderate for the choir (wider range), "
+                "another melody instrument, or Melody: auto.") from None
     raise first
 
 
@@ -1668,14 +1686,20 @@ def _bass_plan(settings: Settings, model_lines: list[Line], insts, spans, key) -
             return inst.is_comfortable(q) or (moderate and inst.is_playable(q))
 
         offs = BASS_FILE_OCTAVES.get(ln.id, ln.octaves)
-        # the line's octave: the first of its octaves that fits every note, else the one that fits most;
-        # notes outside its range there move by an octave (a real bass part would do the same)
+        # the line's octave: the first of its octaves that fits at least 2/3 of the notes, else the one that
+        # fits most. A line doubling an octave below (basses, tuba, contrabassoon) rests on the notes it can't
+        # reach there, so it keeps the line's shape (v1.0, Sam); other lines move such a note by an octave.
         off = next((o for o in offs if sum(ok(nt.pitch + o) for nt in ref) * 3 >= 2 * len(ref)), None)
         if off is None:
             off = max(offs, key=lambda o: sum(ok(nt.pitch + o) for nt in ref))
+        below = off < 0
         moved = []
         for nt in ref:
             q = nt.pitch + off
+            if below:
+                if ok(q):
+                    moved.append(Note(q, nt.start, nt.end, nt.velocity))
+                continue
             for d in (0, 12, -12, 24, -24):
                 if ok(q + d):
                     q += d
@@ -1686,9 +1710,12 @@ def _bass_plan(settings: Settings, model_lines: list[Line], insts, spans, key) -
                 break
             moved.append(Note(q, nt.start, nt.end, nt.velocity))
         else:
-            lfill = [None if f is None else next((f + off + d for d in (0, 12, -12) if ok(f + off + d)), None)
-                     for f in fill]
-            if all(f is not None or fill[i] is None for i, f in enumerate(lfill)):
+            if below:
+                lfill = [None if f is None or not ok(f + off) else f + off for f in fill]
+            else:
+                lfill = [None if f is None else next((f + off + d for d in (0, 12, -12) if ok(f + off + d)), None)
+                         for f in fill]
+            if moved and (below or all(f is not None or fill[i] is None for i, f in enumerate(lfill))):
                 c, fg = _figures_from(moved, spans, lfill)
                 seq = [c[i] + d for i in range(len(spans)) if c[i] is not None for _, _, d, _ in fg[i]]
                 if ln.id != CHOIR_BASS or all(abs(b - a) <= 12 for a, b in zip(seq, seq[1:])):

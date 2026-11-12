@@ -64,6 +64,7 @@ def test_a_is_unchanged_from_milestone_3():
         assert not must_fix(check(o.parts, chords, key, "safe")), rid  # re-check independently
 
 
+@pytest.mark.slow  # skipped by run_tests.bat; release.bat runs it
 @pytest.mark.parametrize("approach", ["B", "C"])
 def test_b_and_c_are_clean_in_every_section_combination(progression, approach):
     chords, key = progression
@@ -86,6 +87,7 @@ def test_every_preset_in_every_approach(progression):
             assert {ln.instrument for ln in o.sounding_lines} <= set(p.instruments)
 
 
+@pytest.mark.slow  # skipped by run_tests.bat; release.bat runs it
 def test_forces_and_density_sliders(progression):
     chords, key = progression
     for forces, density in SLIDER_SAMPLE:

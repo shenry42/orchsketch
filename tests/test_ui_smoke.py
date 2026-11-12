@@ -95,6 +95,13 @@ def make_window(tmp_path, notes=None):
     w.notify = lambda title, text: (notes if notes is not None else []).append((title, text))
     w.open_folder = lambda path: None
     w.show_menu = lambda menu: None  # never block on a real popup in tests
+    w.ask_save = lambda: "discard"  # never block on the save prompt in tests
+    from PySide6.QtCore import QSettings
+    w.settings = QSettings(str(tmp_path / "settings.ini"), QSettings.IniFormat)  # never touch the real ones
+    w.export_box.setCurrentIndex(w.export_box.findData("parts"))
+    w.combined_box.setChecked(False)
+    w.ask_save_path = lambda default: tmp_path / "Projects" / default.name
+    w.projects_root = tmp_path / "Projects"
     w.export_root = tmp_path / "Exports"
     w.presets_folder = tmp_path / "Presets"
     w.player_factory = lambda: Player(FakeBackend)
@@ -315,4 +322,23 @@ def test_milestone_5_controls(app, tmp_path):
     assert w.values["strings"]["pattern"] == "8ths"
     # a bad melody file is refused with a message
     assert not w.load_part_file("melody", DATA / "01_epic_staple.mid") and "Can't use" in notes[-1][0]
+    w.close()
+
+
+def test_piano_roll_writes_note_names(app, tmp_path):
+    """v1.0 (Sam): the piano roll shows each note's name (Ableton names by default), once per repeated note."""
+    from orchsketch.midi_io import Note
+    w = make_window(tmp_path)
+    w.set_key("A", "minor")
+    assert w.load(DATA / "01_epic_staple.mid")
+    w.confirm_all()
+    w.generate()
+    w.show_part("vc")
+    names = [t for _, t in w.piano.labels()]
+    assert names and names[0] == "A1"  # cellos on A2 (scientific) = A1 in Ableton names
+    w.piano.set_part("x", [Note(60, 0, 240), Note(60, 240, 480), Note(62, 480, 960), Note(60, 960, 1200)], 1920,
+                     [0], "scientific", w.key())
+    assert [t for _, t in w.piano.labels()] == ["C4", "D4", "C4"]  # the repeated C isn't labelled twice
+    w.show()
+    w.piano.repaint()  # paints without errors
     w.close()

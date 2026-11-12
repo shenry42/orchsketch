@@ -5,6 +5,9 @@ regeneration (unlocked parts, one part, one chord), per-chord and per-bar swaps 
 undo/redo for every edit, the top-voice option, keep-as-is, the global sliders and presets.
 Milestone 5 adds the melody and bass file slots, rhythm patterns (per section, per part), moderate mode
 (Character slider), the independent bass, re-strike every bar, and per-section sliders (side panel scope).
+Milestone 6 adds projects (File > New / Open / Save / Save As, a "*" in the title for unsaved changes, and
+a save prompt before anything is thrown away) and the full export options (per-part files, the full-score
+file or both, plus optional combined divisi files).
 Generation of the three alternatives runs in the background so the window stays responsive.
 """
 from __future__ import annotations
@@ -25,7 +28,8 @@ from .. import __version__
 from ..analysis import AnalysisSession, ChordLabel, SymbolError, parse_symbol
 from ..checker import chords_from_session
 from ..edits import bar_chords, regenerate, regenerate_chord, regenerate_part, swap
-from ..export import EXPORT_ROOT, export_folder, export_part, export_parts
+from .. import project as pj
+from ..export import BOTH, EXPORT_CHOICES, EXPORT_ROOT, FULL, PARTS, export_all, export_folder, export_part, safe_name
 from .. import patterns as pat
 from ..generator import (
     APPROACH, APPROACHES, CHARACTERS, DENSITY_STEPS, DOUBLINGS, DYNAMIC_STEPS, FORCES, MELODY_HOSTS, TOP_INPUT,
@@ -51,6 +55,8 @@ CUSTOM = "custom"
 ALL = "all"
 SLIDERS = ("character", "forces", "density", "dynamics")
 RENDER_KEYS = ("dynamics", "pattern")  # apply at once, without regenerating
+EXPORT_NAMES = {PARTS: "Per-part files", FULL: "Full score file", BOTH: "Parts + full score"}
+SAVE, DISCARD, CANCEL = "save", "discard", "cancel"
 
 
 def default_values() -> dict:
@@ -108,7 +114,7 @@ class EditState:
     ipatterns: tuple = ()  # instrument patterns from the preset
     ppatterns: tuple = ()  # per-part patterns
     restrike: bool = False
-    melody: tuple | None = None  # (file name, notes)
+    melody: tuple | None = None  # (file name, notes, file bytes)
     bass: tuple | None = None
     mel_inst: str | None = None
     mel_double: str = "auto"
@@ -149,8 +155,13 @@ class MainWindow(QMainWindow):
         self.ipatterns: dict[str, str] = {}  # instrument -> pattern (presets)
         self.ppatterns: dict[str, str] = {}  # line id -> pattern (part menu)
         self.scope = ALL
-        self.melody_file: tuple | None = None  # (file name, notes)
+        self.melody_file: tuple | None = None  # (file name, notes, file bytes)
         self.bass_file: tuple | None = None
+        self.chords_file: tuple | None = None  # (file name, file bytes) of the chord clip
+        self.project_path: Path | None = None
+        self.projects_root = pj.PROJECTS_ROOT
+        self._saved = None  # the history state that was last saved or opened (None: never)
+        self._saved_tempo = 140
         self.history = History()
         self._restoring = False
         self.run_async = True  # tests set False: Generate then runs in the calling thread
@@ -164,6 +175,7 @@ class MainWindow(QMainWindow):
         self.job_timer.setInterval(40)
         self.job_timer.timeout.connect(self._poll_job)
         self.history.reset(self.snapshot())
+        self._mark_saved()
         if problems:
             QTimer.singleShot(0, lambda: self.statusBar().showMessage(
                 "Some saved presets couldn't be read: " + "; ".join(problems), 15000))
@@ -175,7 +187,8 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(10, 10, 10, 6)
 
         bar = QHBoxLayout()
-        self.open_btn = QPushButton("Open chords…")
+        self.open_btn = QPushButton("Open…")
+        self.open_btn.setToolTip("Open a block-chord MIDI file or an OrchSketch project (.osk)")
         self.open_btn.clicked.connect(self.open_dialog)
         self.file_label = QLabel("No file")
         self.file_label.setStyleSheet(f"color: {MUTED};")
@@ -369,10 +382,26 @@ class MainWindow(QMainWindow):
         tr.addStretch(1)
         self.all_handle = DragHandle(self.files_for_all, "⠿ All", "Drag every part into Ableton")
         self.all_handle.setStyleSheet("padding: 4px 10px; border: 1px solid #555; border-radius: 4px;")
-        self.export_parts_btn = QPushButton("Export parts")
-        self.export_parts_btn.setToolTip("Save one MIDI file per part to Documents\\OrchSketch\\Exports")
+        self.export_box = QComboBox()
+        for k in EXPORT_CHOICES:
+            self.export_box.addItem(EXPORT_NAMES[k], k)
+        self.export_box.setToolTip("What Export and the All handle give you: one file per part, one multi-track "
+                                   "full-score file, or both")
+        choice = self.settings.value("export_choice", BOTH)
+        self.export_box.setCurrentIndex(max(0, self.export_box.findData(choice)))
+        self.export_box.currentIndexChanged.connect(
+            lambda _: self.settings.setValue("export_choice", self.export_box.currentData()))
+        self.combined_box = QCheckBox("Combined divisi")
+        self.combined_box.setToolTip("Also write one file per instrument with all its lines (divisi, a2, horns "
+                                     "1-4), e.g. Hn-all")
+        self.combined_box.setChecked(str(self.settings.value("export_combined", "false")).lower() == "true")
+        self.combined_box.toggled.connect(lambda on: self.settings.setValue("export_combined", bool(on)))
+        self.export_parts_btn = QPushButton("Export")
+        self.export_parts_btn.setToolTip("Save the MIDI files to Documents\\OrchSketch\\Exports\\{project}")
         self.export_parts_btn.clicked.connect(self.export_parts_action)
         tr.addWidget(self.all_handle)
+        tr.addWidget(self.export_box)
+        tr.addWidget(self.combined_box)
         tr.addWidget(self.export_parts_btn)
         root.addLayout(tr)
         self.checker_label = QLabel("")
@@ -461,11 +490,18 @@ class MainWindow(QMainWindow):
 
     def _menus(self):
         m = self.menuBar().addMenu("&File")
-        for text, slot, sc in (("&Open chords…", self.open_dialog, QKeySequence.Open),
+        for text, slot, sc in (("&New project", self.new_project, QKeySequence.New),
+                               ("&Open chords or project…", self.open_dialog, QKeySequence.Open),
+                               ("&Save project", self.save_project, QKeySequence.Save),
+                               ("Save project &as…", self.save_project_as, QKeySequence("Ctrl+Shift+S")),
+                               (None, None, None),
                                ("&Generate", self.generate, QKeySequence("Ctrl+G")),
-                               ("Export &parts", self.export_parts_action, QKeySequence("Ctrl+E")),
+                               ("&Export", self.export_parts_action, QKeySequence("Ctrl+E")),
                                ("&Re-export input clip…", self.export_dialog, QKeySequence("Ctrl+Shift+E")),
                                ("&Quit", self.close, QKeySequence.Quit)):
+            if text is None:
+                m.addSeparator()
+                continue
             a = QAction(text, self)
             a.setShortcut(sc)
             a.triggered.connect(slot)
@@ -499,7 +535,7 @@ class MainWindow(QMainWindow):
         h = self.menuBar().addMenu("&Help")
         a = QAction("&About", self)
         a.triggered.connect(lambda: QMessageBox.about(
-            self, "OrchSketch", f"OrchSketch {__version__}\nMilestone 5: motion."))
+            self, "OrchSketch", f"OrchSketch {__version__}\nOrchestral sketching assistant (v1)."))
         h.addAction(a)
 
     def _fill_tonics(self, current: str):
@@ -643,6 +679,7 @@ class MainWindow(QMainWindow):
             w.setEnabled(r)
         self.undo_btn.setToolTip(f"Undo {self.history.undo_label()} (Ctrl+Z)" if u else "Nothing to undo")
         self.redo_btn.setToolTip(f"Redo {self.history.redo_label()} (Ctrl+Y)" if r else "Nothing to redo")
+        self._update_title()
 
     # ------------------------------------------------------------------ key
     def key(self) -> Key:
@@ -671,17 +708,30 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ files
     def open_dialog(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Open block-chord MIDI", str(Path.home()),
-                                              "MIDI files (*.mid *.midi)")
+        start = self.projects_root if self.projects_root.exists() else Path.home()
+        path, _ = QFileDialog.getOpenFileName(self, "Open chords or project", str(start),
+                                              "Chords or projects (*.mid *.midi *.osk);;MIDI files (*.mid *.midi);;"
+                                              "OrchSketch projects (*.osk)")
         if path:
             self.load(path)
 
     def load(self, path) -> bool:
+        """Open a chord clip (.mid) as a new project, or an OrchSketch project (.osk)."""
+        if str(path).lower().endswith(pj.SUFFIX):
+            return self.open_project(path)
+        if not self.confirm_discard():
+            return False
         try:
             clip = read_chord_file(path)
+            data = Path(path).read_bytes()
         except InputError as exc:
             QMessageBox.warning(self, "Can't use this file", str(exc))
             return False
+        except OSError as exc:
+            QMessageBox.warning(self, "Can't use this file", f"Couldn't read the file ({exc}).")
+            return False
+        self.chords_file = (Path(path).name, data)
+        self.project_path = None
         self.session = AnalysisSession(clip, self.key())
         self.selected = None
         self.clear_orchestration()
@@ -689,19 +739,20 @@ class MainWindow(QMainWindow):
         self.file_label.setText(f"{Path(path).name}  ·  {clip.bars} bars")
         self.file_label.setStyleSheet("")
         self.history.reset(self.snapshot(), "Open file")
+        self._mark_saved()
         self._refresh()
         if clip.warnings:
             self.statusBar().showMessage(" ".join(dict.fromkeys(clip.warnings)), 10000)
         return True
 
     def dragEnterEvent(self, e):  # noqa: N802
-        if e.mimeData().hasUrls() and any(u.toLocalFile().lower().endswith((".mid", ".midi"))
+        if e.mimeData().hasUrls() and any(u.toLocalFile().lower().endswith((".mid", ".midi", pj.SUFFIX))
                                           for u in e.mimeData().urls()):
             e.acceptProposedAction()
 
     def dropEvent(self, e):  # noqa: N802
         for u in e.mimeData().urls():
-            if u.toLocalFile().lower().endswith((".mid", ".midi")):
+            if u.toLocalFile().lower().endswith((".mid", ".midi", pj.SUFFIX)):
                 self.load(u.toLocalFile())
                 break
 
@@ -1045,10 +1096,14 @@ class MainWindow(QMainWindow):
         """Load a melody or bass file into its slot (monophonic, starts with the chords)."""
         try:
             clip = read_monophonic_file(path, kind.capitalize())
+            data = Path(path).read_bytes()
         except InputError as exc:
             self.notify("Can't use this file", str(exc))
             return False
-        entry = (Path(path).name, tuple(clip.notes))
+        except OSError as exc:
+            self.notify("Can't use this file", f"Couldn't read the file ({exc}).")
+            return False
+        entry = (Path(path).name, tuple(clip.notes), data)
         if kind == "melody":
             self.melody_file = entry
         else:
@@ -1408,7 +1463,7 @@ class MainWindow(QMainWindow):
             return
         ln = self.orch.line(line_id)
         self.piano.set_part(ln.label, self.orch.part(line_id).notes, self.session.clip.length,
-                            [c.start for c in self.orch.chords], self.name_style)
+                            [c.start for c in self.orch.chords], self.name_style, self.key())
 
     # ------------------------------------------------------------------ playback
     def _load_player(self):
@@ -1469,6 +1524,8 @@ class MainWindow(QMainWindow):
     def _tempo_changed(self, bpm):
         if self.player is not None:
             self.player.set_bpm(bpm)
+        if hasattr(self, "undo_btn"):
+            self._update_title()
 
     def _loop_changed(self, on):
         if self.player is not None:
@@ -1496,6 +1553,11 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ export
     def project_name(self) -> str:
+        """The .osk file's name once saved, else the chord clip's name."""
+        if self.project_path is not None:
+            return self.project_path.stem
+        if self.chords_file is not None:
+            return Path(self.chords_file[0]).stem
         return Path(self.session.clip.source_path).stem if self.session else "OrchSketch"
 
     def parts_folder(self) -> Path:
@@ -1509,10 +1571,12 @@ class MainWindow(QMainWindow):
         return [p] if p else []
 
     def files_for_all(self) -> list[Path]:
+        """What the All handle drags and Export writes: the export choice (+ combined divisi files)."""
         if not self.orch:
             return []
-        return export_parts(self.orch, self.parts_folder(), self.project_name(), self.tempo.value(),
-                            self.session.clip.length)
+        return export_all(self.orch, self.parts_folder(), self.project_name(), self.tempo.value(),
+                          self.session.clip.length, self.export_box.currentData() or BOTH,
+                          self.combined_box.isChecked())
 
     def export_parts_action(self) -> list[Path]:
         if not self.orch:
@@ -1520,12 +1584,156 @@ class MainWindow(QMainWindow):
             return []
         files = self.files_for_all()
         folder = self.parts_folder()
-        self.statusBar().showMessage(f"Exported {len(files)} parts of alternative {self.approach} to {folder}",
+        self.statusBar().showMessage(f"Exported {len(files)} files of alternative {self.approach} to {folder}",
                                      15000)
         self.open_folder(folder)
         return files
 
+    # ------------------------------------------------------------------ projects (.osk)
+    def has_unsaved_changes(self) -> bool:
+        """Edits since the last save/open, or a new tempo. Undoing back to the saved state counts as saved."""
+        return self.history.current is not self._saved or self.tempo.value() != self._saved_tempo
+
+    def _worth_keeping(self) -> bool:
+        """Only ask before discarding something real: an orchestration, or a project that has a file."""
+        return self.has_unsaved_changes() and (any(self.alts) or self.project_path is not None)
+
+    def _mark_saved(self):
+        self._saved = self.history.current
+        self._saved_tempo = self.tempo.value()
+        self._update_title()
+
+    def _update_title(self):
+        name = self.project_name() if self.session else None
+        star = " *" if self.session is not None and self.has_unsaved_changes() else ""
+        self.setWindowTitle(f"OrchSketch {__version__}" + (f" - {name}{star}" if name else ""))
+
+    def ask_save(self) -> str:
+        """Save / discard / cancel. Replaceable (tests never open a dialog)."""
+        r = QMessageBox.question(self, "Unsaved changes", f"Save the changes to {self.project_name()}?",
+                                 QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel, QMessageBox.Save)
+        return {QMessageBox.Save: SAVE, QMessageBox.Discard: DISCARD}.get(r, CANCEL)
+
+    def ask_save_path(self, default: Path) -> Path | None:
+        """Where to save the project. Replaceable (tests never open a dialog)."""
+        default.parent.mkdir(parents=True, exist_ok=True)
+        path, _ = QFileDialog.getSaveFileName(self, "Save project", str(default), "OrchSketch projects (*.osk)")
+        return Path(path) if path else None
+
+    def confirm_discard(self) -> bool:
+        """Before throwing the current work away: True to go on (saved or discarded), False to stop."""
+        if not self._worth_keeping():
+            return True
+        answer = self.ask_save()
+        if answer == SAVE:
+            return self.save_project() is not None
+        return answer == DISCARD
+
+    def new_project(self) -> bool:
+        if not self.confirm_discard():
+            return False
+        self.stop()
+        self.session = None
+        self.chords_file = None
+        self.project_path = None
+        self.selected = None
+        self.clear_orchestration()
+        self.melody_file = self.bass_file = None
+        self.file_label.setText("No file")
+        self.file_label.setStyleSheet(f"color: {MUTED};")
+        self._show_slots()
+        self.history.reset(self.snapshot(), "New project")
+        self._mark_saved()
+        self._refresh()
+        self._refresh_undo()
+        return True
+
+    def to_project(self) -> pj.Project:
+        st = self.snapshot()
+
+        def inp(entry):
+            return None if entry is None else pj.InputFile(entry[0], entry[2] if len(entry) > 2 else b"",
+                                                           tuple(entry[1]))
+        return pj.Project(
+            chords=pj.InputFile(*self.chords_file) if self.chords_file else pj.InputFile("chords.mid"),
+            clip=self.session.clip, tempo=self.tempo.value(), loop=self.loop_box.isChecked(),
+            labels=st.labels, tonic=st.tonic, mode=st.mode, preset=st.preset, active=st.active, values=st.values,
+            ipatterns=st.ipatterns, ppatterns=st.ppatterns, restrike=st.restrike, melody=inp(st.melody),
+            bass=inp(st.bass), mel_inst=st.mel_inst, mel_double=st.mel_double, independent=st.independent,
+            top_voice=st.top_voice, keep=st.keep, seed=st.seed, alts=st.alts, locks=st.locks, tab=st.tab,
+            dirty=st.dirty, scope=self.scope)
+
+    def save_project(self) -> Path | None:
+        """Save to the project's file (asks where the first time). Returns the path, or None if cancelled."""
+        if self.session is None:
+            self.notify("Nothing to save", "Open a chord file first.")
+            return None
+        if self.project_path is None:
+            return self.save_project_as()
+        return self._write_project(self.project_path)
+
+    def save_project_as(self) -> Path | None:
+        if self.session is None:
+            self.notify("Nothing to save", "Open a chord file first.")
+            return None
+        path = self.ask_save_path(self.projects_root / f"{safe_name(self.project_name())}{pj.SUFFIX}")
+        return self._write_project(path) if path else None
+
+    def _write_project(self, path: Path) -> Path | None:
+        try:
+            out = pj.save(self.to_project(), path)
+        except OSError as exc:
+            self.notify("Couldn't save the project", str(exc))
+            return None
+        self.project_path = out
+        self._mark_saved()
+        self.statusBar().showMessage(f"Saved {out}", 8000)
+        return out
+
+    def open_project(self, path) -> bool:
+        if not self.confirm_discard():
+            return False
+        try:
+            p = pj.load(path)
+        except pj.ProjectError as exc:
+            self.notify("Can't open this project", str(exc))
+            return False
+        self.stop()
+        self.session = AnalysisSession(p.clip, Key(p.tonic, p.mode))
+        self.chords_file = (p.chords.name, p.chords.data)
+        self.project_path = Path(path)
+        self.selected = None
+        self.piano.clear_part()
+        self.clear_orchestration()
+
+        def entry(f):
+            return None if f is None else (f.name, tuple(f.notes), f.data)
+        st = EditState(tuple(p.labels), p.tonic, p.mode, p.preset, frozenset(p.active), tuple(p.values),
+                       tuple(p.ipatterns), tuple(p.ppatterns), p.restrike, entry(p.melody), entry(p.bass), p.mel_inst,
+                       p.mel_double, p.independent, p.top_voice, p.keep, p.seed, tuple(p.alts), tuple(p.locks),
+                       p.tab, p.dirty)
+        self.tempo.blockSignals(True)
+        self.tempo.setValue(int(round(p.tempo)))
+        self.tempo.blockSignals(False)
+        self.loop_box.setChecked(p.loop)
+        self.restore(st)
+        self.set_scope(p.scope if p.scope in (ALL, *SECTIONS) else ALL)
+        self.file_label.setText(f"{p.chords.name}  ·  {p.clip.bars} bars")
+        self.file_label.setStyleSheet("")
+        self.history.reset(self.snapshot(), "Open project")
+        self._mark_saved()
+        self._refresh_undo()
+        n_saved = len(p.labels)
+        if n_saved and n_saved != len(self.session.results):
+            self.statusBar().showMessage("This version splits the chords differently; check the chord labels.", 15000)
+        else:
+            self.statusBar().showMessage(f"Opened {Path(path).name}", 8000)
+        return True
+
     def closeEvent(self, e):  # noqa: N802
+        if not self.confirm_discard():
+            e.ignore()
+            return
         if self._job is not None:
             self._job.cancel()
         self._pool.shutdown(wait=False, cancel_futures=True)

@@ -107,9 +107,9 @@ Generation works in three steps: assign roles, build candidate voicings that pas
 
 **Pipeline**
 
-1. **Roles.** Each active part gets one role for the passage: bass, low harmony, mid harmony, high harmony, melody, or pad. The preset sets the defaults, and you can override them.
-2. **Bass line.** If you supply a bass file, low strings and low brass double it in octaves (cellos and basses an octave apart; tuba and bass trombone on the lower octave). Without a bass file they follow the chord's bass note (the root, or the slash bass). A per-project toggle switches to an independent line that moves by step toward the next chord's bass. This toggle is moderate mode only.
-3. **Melody.** If you supply a melody file, it goes to one instrument chosen by register and preset (e.g. Violins I, horns, or flute) and is optionally doubled an octave up or down. Melody notes are fixed, and the harmony is voiced around them.
+1. **Roles.** Each active part gets one role for the passage: bass, low harmony, mid harmony, high harmony, melody, or pad. The preset sets the defaults. In v1 the only override is which instrument plays the melody; full per-part role overrides and roles in presets come later.
+2. **Bass line.** If you supply a bass file, every part on the bass line doubles it in octaves, with the file's own rhythm: cellos at the bass register; basses, tuba and contrabassoon an octave lower where their range allows; bass trombone on the lower octave when it fits; bassoon 2 too. A note below an instrument's range moves up an octave, and a part that can't play the line in any octave rests. The choir bass sings the line as well, unless that would need a leap over an octave (then it keeps the chord's bass note). Without a bass file the bass parts follow the chord's bass note (the root, or the slash bass). A per-project toggle switches to an independent line that moves by step toward the next chord's bass: at most two diatonic passing notes, on chords of a half note or longer. This toggle is moderate mode only: it needs Character at Moderate for the sections playing the bass, and no bass file.
+3. **Melody.** If you supply a melody file, it goes to one instrument chosen by register, with its own order per alternative: A tries the horns first, B Violins I, C the flute, each with fallbacks (at pitch first, then an octave away). You can also pick the instrument. The melody replaces that instrument's top line; its other players stay on harmony. With keep-as-is the melody stays out of the strings. Melody notes are fixed, and the harmony is voiced around them (kept below the melody where it can be). Octave doubling: Auto, Off, Octave up or Octave down. Auto doubles at Density 4–5 (A an octave down, B and C up); an octave-down doubling stays at G3 or above. If a melody plan can't be voiced, the next one is tried: the same instrument without the doubling, then the next instrument.
 4. **Voicing.** For each chord, candidate pitch sets are built inside each part's range. They are ranked by voice leading from the previous chord, spacing, doubling and slider weights.
 5. **Pattern.** The chosen rhythm pattern is applied per part (section 5c).
 6. **Check.** The rule checker runs (section 7). Any hard-rule failure discards the candidate. It is never shown and then flagged.
@@ -119,7 +119,7 @@ Generation works in three steps: assign roles, build candidate voicings that pas
 - No note outside playable range. In safe mode, no note outside comfortable range.
 - Every chord's defining tones are present somewhere in the texture: root, 3rd (except power and sus chords), 7th when labeled. The 5th may be omitted.
 - Low-interval limits, checked across the whole sounding texture rather than per section: no 3rds or 2nds between adjacent harmony voices below about C3, and no intervals smaller than a 5th below about Bb1. (The limits table goes in the rules data and is cross-checked in Milestone 2.)
-- Spacing: within a section, adjacent upper voices are at most an octave apart. Wider gaps are allowed only between bass and tenor.
+- Spacing: within a section, adjacent upper voices are at most an octave apart. Wider gaps are allowed only between bass and tenor. A melody part is exempt: it is a line of its own, not part of the section's chord (so a melody doubled high in the flutes over the other woodwinds is allowed).
 - Choir: no voice crossing, and each voice moves by at most an octave between chords.
 - Never double the leading tone or the chord 7th in an exposed outer voice.
 
@@ -130,7 +130,10 @@ Generation works in three steps: assign roles, build candidate voicings that pas
 - Parallel 5ths and octaves are allowed when they come from doubling or a low-brass power-chord texture, both normal in epic writing. They are penalised between independent inner lines and banned within the choir.
 - Epic traits: open 5ths and octaves in the low register, horns in their F3–F4 heroic zone for harmony, strings carrying the widest span, and the melody doubled at the octave as density rises.
 - **Safe mode:** only the labeled chord tones are used.
-- **Moderate mode:** 9ths, sus2/sus4 colour and added 6ths are allowed in upper voices, plus passing tones in patterns.
+- **Moderate mode:** 9ths, sus2/sus4 colour and added 6ths are allowed in upper voices, plus passing tones in patterns. Details:
+  - At most one colour tone per chord, in one upper voice: a diatonic 9th, a 4th (never over a major 3rd) or a 6th. It never sits a semitone from another voice, and there is none on diminished, augmented or half-diminished chords. About 45% of chords get one.
+  - Notes may reach playable range only where no comfortable octave exists (flagged yellow).
+  - Passing tones only on the last 8th of a chord in 8th and 16th ostinatos, only where the part moves by a 3rd, and dropped wherever they would add parallels.
 
 **5c. Rhythm patterns (v1)**
 
@@ -138,25 +141,30 @@ Generation works in three steps: assign roles, build candidate voicings that pas
 | --- | --- | --- |
 | Sustain | Any | Notes held for the chord's length |
 | 8th ostinato | Strings, low brass | Repeated 8ths on chord tones, accented on beats 1 and 3 |
-| 16th string ostinato | Violins, violas, cellos | Repeated 16ths, or alternating two chord tones |
-| Brass stabs | Brass, low strings | Short hits on chosen beats, default 1 and the "and" of 2 |
-| Half-time pulse | Low brass, low strings, choir | Hits on beats 1 and 3 |
+| 16th string ostinato | Violins, violas, cellos | Repeated 16ths, accented on every beat |
+| 16ths alternating | Violins, violas, cellos | 16ths alternating the part's note with the next chord tone below, always ending on the part's own note |
+| Brass stabs | Brass, low strings | Short hits (an 8th long) on chosen beats, default 1 and the "and" of 2 |
+| Half-time pulse | Low brass, low strings, choir | Hits (a quarter long) on beats 1 and 3 |
 
 - **Sustain behaviour:** a note common to two consecutive identical chords is held through, as one tied note. At every chord change all parts re-strike. A toggle re-strikes every bar instead.
-- Patterns are assigned per section and can be changed per part.
+- Patterns are assigned per section and can be changed per part. Presets can also set them per instrument (e.g. low brass). Priority: part, then instrument, then section.
+- Every pattern strikes at each chord change. Unaccented notes play at 80% velocity.
+- Choirs sing only Sustain, 8th ostinato, stabs or half-time pulse.
+- Parts playing the melody or bass file keep the file's rhythm.
+- Where a pattern would break a rule at a chord, that part falls back to Sustain for that chord, so generated output still has no rule errors.
 
 **5d. Control over results**
 
 - 3 alternatives per generation.
 - **Lock** any part, then regenerate the rest around it.
-- **Regenerate** one part only, all parts, or one chord only. Undo/redo (Ctrl+Z / Ctrl+Y) covers every edit: corrections, locks, swaps, slider changes and regenerations.
+- **Regenerate** one part only, all parts, or one chord only. Regenerating steers away from the last 8 results, so it doesn't cycle between two. Undo/redo (Ctrl+Z / Ctrl+Y) covers every edit: corrections, locks, swaps, slider changes and regenerations.
 - **Choose per chord or per bar:** for any chord, pick a different alternative's voicing just for that chord. After a swap, the checker re-runs on the neighbouring chords and flags any leaps the swap caused.
 - **Keep as-is option:** your input voicing is kept exactly as written and assigned to one part (default: strings), with the rest orchestrated around it.
 - **One-line reason** for each alternative, e.g. *"Wide strings, horns on 3rds and 7ths, low brass in open 5ths."*
 
 ## 6. Controls, interface and playback
 
-Four sliders, set per section (woodwinds, brass, strings, choir) with a global master that moves all four, plus ensemble presets. The main screen is a grid of instruments by chords.
+Four sliders, set per section (woodwinds, brass, strings, choir) with a global master that moves all four, plus ensemble presets. The side panel's "Set" box picks All sections or one section; the pattern picker sits in the same panel. Dynamics and Pattern apply at once; Character, Forces and Density take effect at the next Generate. With every section set the same, results equal the master slider's. The main screen is a grid of instruments by chords.
 
 **Sliders**
 
@@ -165,9 +173,9 @@ Four sliders, set per section (woodwinds, brass, strings, choir) with a global m
 | Character | Safe | Moderate | Chord tones only, moving toward added 9ths/sus/6ths, passing tones and independent bass. A wild setting is reserved for later. |
 | Forces | Solo | Section / divisi | Solo instruments, then full sections, then divisi splits |
 | Density | Sparse | Full | How many of the preset's parts play, and how many doublings |
-| Dynamics | pp | ff | Velocity (pp 30, p 50, mp 65, mf 80, f 100, ff 120), plus one constant CC1 value per part at the same level, because most library sustain patches use CC1 for loudness |
+| Dynamics | pp | ff | Velocity (pp 30, p 50, mp 65, mf 80, f 100, ff 120), plus one constant CC1 value per part at its section's level, because most library sustain patches use CC1 for loudness |
 
-**Presets (v1):** Strings only · Strings + horns · Brass + choir · Full epic · Woodwinds + strings (soft) · Low and heavy (low strings, low brass, contrabassoon, men's choir). Presets set active parts, counts, roles, patterns and slider starting points. You can save your own presets.
+**Presets (v1):** Strings only · Strings + horns · Brass + choir · Full epic · Woodwinds + strings (soft) · Low and heavy (low strings, low brass, contrabassoon, men's choir). Presets set active parts, counts, patterns (per section or per instrument) and slider starting points, master and per section. You can save your own presets. Built-in patterns: Full epic has strings on 8th ostinato and tenor/bass trombones and tuba on half-time pulse; Low and heavy has strings on 8ths and low brass on stabs; the other presets sustain.
 
 **Main screen, top to bottom**
 
@@ -204,7 +212,7 @@ Export writes standard MIDI files at concert pitch, starting at bar 1 with no le
 - Saved as a JSON `.osk` file in `Documents\OrchSketch\Projects\`. It holds the input files (embedded copies), key, tempo, chord corrections, settings, locks, chosen alternatives, the generated notes themselves, and the generation seed.
 - Reopening a project restores the saved notes exactly, even after app updates change the generator. The seed is only used when you choose to regenerate.
 
-**Rule checker** runs after every generation and on demand. Results are listed per part and per chord, and clicking a warning highlights the cell.
+**Rule checker** runs after every generation and on demand. Results are listed per part and per chord, and clicking a warning highlights the cell. Problems that come only from your own inputs (kept voicing, locked parts, melody and bass files) are shown on the cells, not discarded; everything the generator adds must pass.
 
 | Check | Severity |
 | --- | --- |

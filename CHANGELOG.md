@@ -2,6 +2,71 @@
 
 All notable changes to OrchSketch. Versions follow the milestones in SPEC.md §10.
 
+## v1.0 — Finish (Milestone 6) — 2026-11-12
+
+### Added
+- **Projects (.osk)**, new `project.py` (no UI code):
+  - File > New project (Ctrl+N), Open chords or project (Ctrl+O), Save project (Ctrl+S), Save project as
+    (Ctrl+Shift+S). Projects go to `Documents\OrchSketch\Projects\`. A `.osk` file can also be dropped on
+    the window or passed on the command line.
+  - A project holds everything:
+    - the chord file and the melody/bass files (embedded copies: original bytes plus the notes as read);
+    - key, tempo, loop, corrections and confirmations;
+    - every slider per section, and patterns per section, instrument and part;
+    - re-strike, melody instrument and doubling, independent bass, top voice, keep-as-is;
+    - seed, active instruments, preset and the side panel's scope;
+    - each alternative A/B/C (rendered notes, cells, swaps and their origin, earlier variations, rhythm
+      figures, checker report), plus the locks and the chosen tab.
+  - Reopening rebuilds those objects exactly and never regenerates, so the saved notes come back unchanged
+    even after a generator update.
+  - Plain JSON with tagged tuples, sets and dataclasses. Unknown fields are skipped and missing ones take
+    their defaults, and a file from a newer version is refused with a clear message.
+  - The window title shows `*` for unsaved changes (undoing back to the saved state clears it). Before
+    opening something else, starting a new project or closing, the app offers Save / Discard / Cancel when
+    there is an orchestration or a project file to lose.
+  - The project name (the `.osk` name, or the chord clip's name until saved) is used in export file names.
+- **Full export options**:
+  - *Per-part files*, *Full score file* or *Parts + full score* (the default; remembered).
+  - The full score is a type-1 file `{Project}_Full_{Alt}.mid`: a tempo/time-signature track plus one named
+    track per sounding part, each with its CC1 value, from bar 1 for the clip's length.
+  - Optional *Combined divisi* files: one per instrument playing on several lines, `{Project}_{Code}-all_{Alt}.mid`
+    (e.g. `Vln1-all`, `Hn-all`). Unisons between its lines are merged so no two notes overlap on one pitch.
+  - The *All* drag handle drags whatever the export choice gives.
+- **Packaged app**, `scripts\build_exe.bat`:
+  - A PyInstaller folder build, `build\exe\dist\OrchSketch\OrchSketch.exe`, with fast start (Sam chose a
+    folder over one file).
+  - It bundles `orchsketch/data`, the FluidSynth DLLs and GeneralUser GS (plus its licence).
+  - It runs the built app's self-check, then zips it to `releases\OrchSketch-v1.0-win64.zip`.
+- **Self-check** (`OrchSketch.exe --self-check`, `selfcheck.py`): data files, the generator, export,
+  project round trip and audio (WASAPI shared, plays a chord). Report in
+  `Documents\OrchSketch\logs\self_check.txt`.
+- **Full test-set pass**, `scripts\test_set.bat` (`scripts/testset.py`): drives the real window off-screen and
+  builds the 15 ear-test projects (12 files, plus 1, 4 and 11 with melody and bass) in
+  `Documents\OrchSketch\Projects\TestSet\` with the default preset and seed 1. It checks SPEC §7's automatic
+  rules (labels, playable range, no generator errors, exact reopen) and writes `testset_report.txt`.
+- **Note names in the piano roll** (Sam): every note shows its name, in the chosen naming (Ableton by
+  default). A repeated note is named again only after a rest of more than a beat.
+- Tests: `test_project.py`, `test_packaging.py`, `test_testset_script.py`, new export, UI and generator tests.
+
+### Changed
+- **Bass file, low lines** (Sam's ear test, test 11 with files: "the tuba had a different bass line"). Basses,
+  tuba and contrabassoon, doubling an octave below, now **rest on the notes they can't reach** there instead
+  of jumping up an octave on their own notes. Each instrument has its own range limits, so before, each jumped
+  in different places. Cellos, bass trombone and bassoon still play every note. Other lines still move such
+  a note by an octave.
+- **Melody in a choir voice:**
+  - The search now treats a melody given to the choir (line `mel`) as a choir voice. Before, the other
+    choir parts could move in octaves with it, and the result was then thrown away by the final check.
+  - Choir clashes only between your own fixed parts (melody file and bass file) are shown, not refused
+    (SPEC §7).
+  - When the rest of the choir really can't sing around the melody (usually the choir bass can't go low
+    enough in Safe mode), the message now says so and suggests Character: Moderate, another instrument or
+    Melody: auto.
+- **Slow tests:** the six biggest sweeps are marked `slow`. `run_tests.bat` skips them (`run_tests.bat all`
+  runs everything) and `release.bat` runs them all. The v0.4 and A snapshot tests still run every time.
+- The *Export parts* button is now *Export*. The Open button and File menu open chords or projects.
+- Version 1.0.
+
 ## v0.5 — Motion (Milestone 5) — 2026-11-11
 
 ### Added

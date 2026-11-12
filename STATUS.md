@@ -4,11 +4,11 @@
 > The chat that finishes a milestone updates this file before it ends.
 
 ## Current state
-- **Version:** v0.5
-- **Last milestone completed:** 5 — Motion
-- **Next milestone:** 6 — Finish (SPEC.md §10)
+- **Version:** v1.0
+- **Last milestone completed:** 6 — Finish. **v1 is complete** (SPEC §7 pass/fail: pass, see below).
+- **Next:** your own 5–10 progressions as the second benchmark (SPEC §8, §12), then Phase 2 (SPEC §11).
 - **Repo:** https://github.com/shenry42/orchsketch
-- **Last updated:** 2026-11-11 (Milestone 5)
+- **Last updated:** 2026-11-12 (Milestone 6)
 
 ## Milestones
 - [x] 1 — v0.1 Read and label (+ packaging spike, audio test with Ableton open)
@@ -16,12 +16,26 @@
 - [x] 3 — v0.3 First orchestration (safe mode, grid, playback, per-part export)
 - [x] 4 — v0.4 Control (A/B/C alternatives, lock, swap, undo, global sliders, presets)
 - [x] 5 — v0.5 Motion (patterns, bass, melody, moderate mode, per-section sliders)
-- [ ] 6 — v1.0 Finish (projects, full export, .exe, full test-set pass, Ableton check)
+- [x] 6 — v1.0 Finish (projects, full export, .exe, full test-set pass, Ableton check)
 
 ## Test results (latest run)
-- Automated tests: 0 failed. Windows: 407 passed in 10:10 (`run_tests.bat`, before the Regenerate fix, which
-  adds 3 tests; `release.bat` reruns them). Claude's workspace: 398 passed, 1 skipped (music21 not installed
-  there), 6:56.
+- Automated tests: 0 failed. Claude's workspace: 421 passed, 1 skipped in 7:20 (music21 not installed
+  there). Windows `run_tests.bat` (skips the 66 `slow` sweeps): 367 passed, 66 deselected in 7:07. `release.bat` runs all of them.
+- **V1 pass/fail (SPEC §7): PASS.**
+  - Labels: 12/12 files, every chord the best guess.
+  - No note outside playable range, and 0 checker errors in generated output (`testset_report.txt`: 15/15 runs).
+  - Ear test (`tests/ratings.csv`): all 15 runs × A/B/C rated; final v1.0 scores 5/5 everywhere. In the first pass, test 11 with files got 1/5 (the tuba's octave jumps, now fixed), so only 1 progression was below par even before the fix, within SPEC's "more than 1" limit.
+  - Exported MIDI lands at the right position and pitch in Ableton (Sam, 2026-11-12: pass).
+- Full test-set pass (`scripts\test_set.bat`, default preset Full epic, safe, seed 1): 15/15 runs pass the
+  automatic checks. That covers labels, playable range, generated errors and must-pass warnings (0), and an
+  exact reopen of the saved project.
+- Milestone 6 manual checks (Sam, 2026-11-12):
+  - `run_tests.bat`, `test_set.bat`, `build_exe.bat`: pass. The self-check of the built app passed, audio included.
+  - The packaged app played a project while Ableton was playing on ASIO, and saving then reopening a project
+    restored it: pass.
+  - Ableton drag test, at bar 5 in Arrangement view: a single part and the *All* handle (parts plus the
+    full-score file) start on the bar line, are 4 bars long, show the same note names as the grid, and the
+    full score opens as named tracks: pass.
 - Chord labels on 12-file test set: 12/12 correct, every chord as the best guess (unchanged since Milestone 1).
 - Checker errors in generated output: **0**.
   - Approach A gives exactly the v0.3 notes on all 216 Milestone 3 runs and still has 0 warnings of any kind.
@@ -43,6 +57,9 @@
 - Speed: all three alternatives for 16 bars take about 2 s (melody, bass, moderate and patterns all on: about
   3 s), in the background.
 - Ear-test ratings (tests/ratings.csv):
+  - v1.0 full test set (Sam, 2026-11-12): all 12 progressions plus 1, 4 and 11 with melody and bass files,
+    A/B/C 5/5. The first pass (1.0-rc1) had test 11 + files at 1/5 (tuba octave jumps, fixed). Test 12 got
+    3/5 only because it is 7 bars long, which is by design, so Sam counts it as 5.
   - v0.4: test 1 A/B/C all 5/5.
   - v0.5: tests 1, 4 and 11 with melody + bass files, A/B/C all 4/5 (Sam: "everything is working; patterns
     fairly generic, room for improvement"). The formal pass over all test files is in Milestone 6.
@@ -65,13 +82,11 @@
 ## Known issues
 - Checker: melodic checks (leaps, parallels) follow each part's top note, so the generator must give every divisi line its own part (which also matches per-line export). Parallels are checked only at chord changes, not inside rhythm patterns.
 - Checker: low-interval limits cover simple intervals only. Compound intervals (9ths, 10ths...) have no limit; revisit if wide low voicings sound muddy.
-- `src/orchsketch/data/` (JSON) must be bundled into the `.exe` in Milestone 6 (PyInstaller `--add-data`); the loaders read it from next to the package.
 - Chords over a non-chord bass show the Roman numeral as numeral + "/bass" (e.g. *Bb/C · VII/C*). Provisional notation; revisit if it reads badly.
 - Diminished 7ths are named from the bass note (symmetrical chord): B–D–F–G# with B lowest reads *Bdim7 · ii°7*, not *vii°65*. The alternatives and typed correction cover it.
-- Corrections only last while the app is open. Saving them is part of projects (Milestone 6).
-- Melody and bass files only last while the app is open (like corrections); projects save them (Milestone 6).
-- Ensemble edits: per-project player counts (SPEC §4 "counts editable per project") are covered by the Forces slider and Parts…
-  on/off for now; exact counts per instrument come with projects.
+- Undo history only lasts while the app is open; projects save everything else.
+- Ensemble edits: per-project player counts (SPEC §4 "counts editable per project") are covered by the Forces
+  slider and Parts… on/off (both saved in the project). Exact counts per instrument aren't built (later).
 - Generator speed: all three alternatives for 16 bars take about 2–3 s in the background. The test run is
   about 10 minutes on Windows (was 3:44), most of it the generator sweeps. If it gets slower, cache
   candidates per chord and share them between A/B/C, or move the heaviest sweeps behind a pytest marker.
@@ -114,11 +129,22 @@
 - Out of scope, noted for later:
   - Per-part role overrides beyond the melody instrument (SPEC §5 step 1: "you can override them"), and
     roles in presets. Sam chose melody-instrument only for Milestone 5.
-  - Milestone 6: the combined divisi file, the full-score type-1 file, projects (they also save locks,
-    swaps and corrections; undo history only lasts while the app is open).
   - Not yet built: keep-as-is in other sections (only strings for now) and the SSAATTBB choir layout.
+  - Sam's v1.0 requests: choosing which instrument plays a pedal tone (test 9); an "override" to keep a melody
+    in the choir when the rest of the choir can't sing around it. Hard choir rules are never broken by
+    generated parts (SPEC §5a), so this needs a spec decision, e.g. letting the choir bass rest there.
 - Sam's real Ableton export isn't in the automated tests yet (the round trip was checked by hand). Add one Ableton-exported `.mid` to `tests/data/ableton/` when convenient.
-- `Documents\OrchSketch` is both the Git repo and where the app writes `Exports\`, `Projects\` and `logs\` (git-ignored). Consider moving the repo to its own folder before v1.0.
+- `Documents\OrchSketch` is both the Git repo and where the app writes `Exports\`, `Projects\` and `logs\` (git-ignored). Still worth moving the repo to its own folder (e.g. `Documents\OrchSketch-dev`); the app's folders stay where they are.
+- Bass file: basses, tuba and contrabassoon rest on file notes they can't reach an octave down (v1.0, Sam's
+  choice), so in a low line (test 11 reaches C2) they drop out on a few notes; cellos, bass trombone and
+  bassoon carry them.
+- A melody in a choir voice in Safe mode often can't be voiced (the choir bass's comfortable range starts at
+  G2); the message points to Character: Moderate, which works on tests 1, 4 and 11.
+- Combined divisi files merge unisons between lines, so a combined file can have fewer notes than its lines
+  together. Full-score tracks are all on MIDI channel 1, like the per-part files.
+- The packaged app is a folder (`build\exe\dist\OrchSketch\`, zipped to `releases\OrchSketch-v1.0-win64.zip`,
+  git-ignored), not one file: it opens in 1–2 s instead of 5–10 s (Sam's choice). Not code-signed: Windows
+  SmartScreen may ask once.
 
 ## Decisions made during the build
 <!-- Anything decided in a build chat that SPEC.md doesn't cover. Copy major ones into SPEC.md. -->
@@ -243,19 +269,42 @@
   - Per-part CC1 = the part's section Dynamics (`Orchestration.cc1_for`); export writes it.
   - Melody export code `{Inst}-mel`, doubling `{Inst}-mel8va` / `-mel8vb`; line ids `mel` and `mel-8`.
 
+- **Milestone 6 decisions (Sam):** packaged app as a folder build, not a single `.exe`. `slow` marker on the
+  six biggest sweeps (run_tests.bat skips them, release.bat runs everything). Ear-test projects use the default
+  preset (Full epic), safe, seed 1. Bass-file low lines rest instead of jumping. Note names on the piano roll.
+- **Milestone 6 decisions (Claude's calls):**
+  - *Project format:* one JSON object `{"format": "orchsketch-project", "format_version": 1, "app_version",
+    "saved", "project": {...}}`. The project body mirrors the window's `EditState`. Alternatives are stored
+    as the `Orchestration` objects themselves (tagged dataclasses, `project._CLASSES`), so a reopened
+    alternative compares equal to the saved one. A new type in an orchestration must be added to
+    `_CLASSES` (the encoder refuses unknown types). Saving writes a `.tmp` file first, then renames it.
+  - *Unsaved changes:* the history step that was last saved is remembered, so undoing back to it counts as
+    saved; a tempo change also counts. The save prompt appears only when there is an orchestration or a
+    project file to lose (a freshly opened clip doesn't ask).
+  - *Project name* = the `.osk` file's name, else the chord clip's. Export names use it.
+  - *Export choice* (Parts / Full / Both, default Both) and *Combined divisi* (off) are app settings, not
+    per project.
+  - *Combined divisi files* exist for every instrument with two or more sounding lines (divisi, a2 winds,
+    horns 1–4, a melody host with its harmony line), named `{Code}-all`. CC1 is the highest of its lines.
+  - *Full score:* track 1 holds the name, 4/4 and tempo; then one track per sounding part in score order,
+    named by the part's label.
+  - *Test-set projects* are saved by the real window (driven off-screen), so they are exactly what the app saves.
+- **Line ending note:** `.bat` files must be CRLF (the build/test scripts check it).
+
 ## Notes for the next chat
-- Milestone 6 (projects, full export, `.exe`, full test-set pass, Ableton check):
-  - **Projects (.osk):** save `Settings` fully. That means melody/bass notes (embed the files), the
-    per-section tuples, instrument/part patterns, `melody_instrument`, `melody_double`,
-    `independent_bass` and `restrike_bars`. Also save each alternative's `cells`, `meta` (labels, voices,
-    sources, figures, extras, info, previous) and locks. Reopening must restore the saved notes exactly:
-    re-render with `generator.rerender()` or store the part notes too.
-  - **Full-score type-1 file and the combined divisi file:** `Orchestration.parts` already hold the rendered
-    notes (patterns, figures); use `cc1_for(line_id)` per track.
-  - **.exe:** bundle `src/orchsketch/data/` (PyInstaller `--add-data`).
-  - **Test time:** the run is about 10 min on Windows. If Milestone 6 adds more, consider a `slow` marker
-    for the biggest sweeps (`test_defaults_give_exactly_the_v04_notes`,
-    `test_melody_and_bass_in_every_preset_and_approach`) and run them in `release.bat` only.
+- v1 is done. Next steps (Sam to choose):
+  - Run Sam's own 5–10 progressions as the second benchmark (SPEC §8): add each as a test file with expected
+    labels, then build projects with `scripts/testset.py`-style runs.
+  - Phase 2 (SPEC §11): countermelodies, more and richer patterns (ideas under Known issues), keyswitches,
+    CC1/CC11 curves; requests: pedal-tone instrument choice, per-part role overrides.
+  - Housekeeping: move the repo out of `Documents\OrchSketch`.
+- **Projects:** `project.py` + `MainWindow.to_project()` / `open_project()`. Any new window state that should
+  persist needs a field in `EditState` and `project.Project` (same name); old files fill in its default.
+- **Packaged app:** `scripts\build_exe.bat` (PyInstaller folder build; entry `scripts/orchsketch_main.py`).
+  Data is found next to the package (`_internal\orchsketch\data`), FluidSynth and the SoundFont via
+  `playback/fluid_env.py` (`_MEIPASS`). Check a build with `OrchSketch.exe --self-check`.
+- **Test time:** `run_tests.bat` (not slow) is about 6 min on Windows; the full run is about 11 min. New big
+  sweeps should get `@pytest.mark.slow`.
 - **Data model:**
   - Each `Orchestration` has `cells` (pitch per line per chord) plus `meta`: "labels" (voice label per
     line per chord, used for the doubling links), "voices" (abstract voicing), "sources" (approach per

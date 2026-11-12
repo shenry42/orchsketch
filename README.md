@@ -11,10 +11,12 @@ All scripts are in `scripts\` - double-click them.
 | Script | What it does |
 | --- | --- |
 | `setup.bat` | One-time: installs Python 3.12, the packages, FluidSynth and the GeneralUser GS SoundFont, links Git. Safe to re-run. |
-| `run_app.bat` | Starts OrchSketch. |
-| `run_tests.bat` | Runs the automated tests; full output in `test_results.txt`. |
+| `run_app.bat` | Starts OrchSketch from source. |
+| `build_exe.bat` | Builds the packaged app `build\exe\dist\OrchSketch\OrchSketch.exe` (data, FluidSynth and SoundFont inside), runs its self-check and zips it to `releases\OrchSketch-vX.Y-win64.zip`. |
+| `run_tests.bat` | Runs the automated tests except the slowest sweeps (`-m "not slow"`); full output in `test_results.txt`. |
+| `test_set.bat` | Full test-set pass (SPEC §7-8): builds the 15 ear-test projects in `Documents\OrchSketch\Projects\TestSet\` and writes `testset_report.txt`. |
 | `build_spike.bat` | Milestone 1 throwaway: builds the audio test `.exe`. |
-| `release.bat` | Tests, commits, tags the version, pushes, and writes `releases\orchsketch-vX.Y-src.zip`. |
+| `release.bat` | Runs **all** tests (slow ones too), commits, tags the version, pushes, and writes `releases\orchsketch-vX.Y-src.zip`. |
 | `sound_check.bat` | Plays every audition sound (Milestone 3 SoundFont check); writes `sound_check_results.txt`. |
 | `checker_report.bat` | Runs the rule checker on the hand-made examples and opens `checker_report.txt`. |
 | `check_prereqs.bat` | Lists what's installed (writes `prereqs.txt`). |
@@ -35,12 +37,15 @@ src/orchsketch/
   edits.py          lock + regenerate, regenerate one part / one chord, per-chord swap with leap flags
   history.py        undo/redo snapshots
   presets.py        ensemble presets (data/presets.json) and your own (Documents\OrchSketch\Presets)
-  export.py         per-part MIDI export ({Project}_{Part}_{Alt}.mid)
+  export.py         MIDI export: per part ({Project}_{Part}_{Alt}.mid), full score ({Project}_Full_{Alt}.mid,
+                    type 1), combined divisi ({Project}_{Code}-all_{Alt}.mid)
+  project.py        projects (.osk JSON in Documents\OrchSketch\Projects): save/reopen exactly, no regeneration
+  selfcheck.py      `OrchSketch.exe --self-check` for the packaged build
   data/             the JSON data files (edit these to change a range or a limit)
   playback/         FluidSynth setup, audition player (loop, tempo, mute/solo)
   ui/               PySide6 window (the only package that imports Qt)
 tests/              pytest suite; tests/data holds the 12-progression test set
-scripts/            Windows .bat helpers and the audio spike
+scripts/            Windows .bat helpers, the packaged-app entry point, the test-set pass, the audio spike
 ```
 `vendor\` (FluidSynth, SoundFont) and `.venv\` are created by `setup.bat` and aren't in Git.
 
