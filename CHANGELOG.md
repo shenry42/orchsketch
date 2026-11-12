@@ -2,6 +2,85 @@
 
 All notable changes to OrchSketch. Versions follow the milestones in SPEC.md §10.
 
+## v0.5 — Motion (Milestone 5) — 2026-11-11
+
+### Added
+- **Rhythm patterns** (SPEC §5c, new `patterns.py`), applied after the voicings are chosen, so the pitches at
+  every chord change stay the same:
+  - The patterns are Sustain, 8th ostinato (accents on 1 and 3; the other notes at 80% velocity), 16th
+    ostinato (accent on every beat), 16ths alternating (the part's note with the next chord tone below,
+    always ending on its own note), Brass stabs (8th-note hits on 1 and the "and" of 2) and Half-time pulse
+    (quarter-note hits on 1 and 3). Every pattern strikes at each chord change.
+  - Patterns are set per section in the side panel, and per part from the right-click menu (*Pattern ▸*).
+    A choir sings Sustain, 8ths, stabs or half-time.
+  - Patterns apply at once, like Dynamics, without regenerating. The grid shows the pattern next to each
+    part's name and a ♪ on cells with more than one note.
+  - Safety net: each chord is re-checked against plain Sustain. Where a pattern would add a rule problem, it
+    first loses its passing tones, then the parts named in the problem fall back to Sustain for that chord.
+    Generated output still has 0 errors.
+  - **Re-strike every bar** toggle: held Sustain notes re-strike at each bar line instead of tying.
+- **Melody and bass slots** in the top bar. Open or drop a monophonic clip; × removes it.
+  - **Bass file:** every bass-line part (cellos, basses, bassoon 2, contrabassoon, bass trombone, tuba)
+    plays it with its own rhythm, in octaves. Cellos play it at the bass register; basses, tuba and
+    contrabassoon an octave lower where their range allows, and a note below an instrument's range moves up
+    an octave. The bass trombone takes the lower octave when it fits. The choir bass keeps singing the chord's
+    bass note. The open 5th may rest where the file moves.
+  - **Melody file:** played exactly as written by one instrument, picked by register for each alternative:
+    A tries the horns first, B Violins I, C the flute, each with fallbacks. You can also pick the instrument
+    yourself (*Melody: …*). It replaces that instrument's top line; the instrument's other players stay on
+    harmony.
+  - The harmony is voiced around the melody: it prefers to stay below it, and the search avoids parallels
+    against it.
+  - **Melody doubling:** Auto / Off / 8va / 8vb. Auto doubles at Density 4–5 (A an octave down, B and C an
+    octave up). An octave-down doubling stays at G3 or above.
+  - If a melody plan can't be voiced, the next one is tried: the same instrument without the doubling, then
+    the next instrument.
+- **Moderate mode** (the Character slider is unlocked):
+  - Upper voices may take one colour tone per chord: a diatonic 9th, a sus 4th (never over a major 3rd) or
+    an added 6th. It never sits a semitone from another voice, and there's none on diminished, augmented or
+    half-diminished chords. About 45% of chords get one.
+  - Parts may reach their playable range where no comfortable octave exists. Those notes are flagged yellow.
+  - 8th and 16th ostinatos may end a chord on a diatonic passing tone toward the part's next note (only when
+    it moves by a 3rd, and dropped wherever it would add parallels).
+  - **Independent bass** (moderate only, no bass file): the bass moves by step toward the next chord's bass
+    on chords of a half note or longer, with at most two passing notes. Every bass part plays it, the choir
+    bass included.
+- **Per-section sliders** (SPEC §6): the side panel's *Set* box picks All sections or one section.
+  - Character, Forces, Density, Dynamics and Pattern can each differ per section; *All* moves every section.
+  - Equal values everywhere give exactly the master-slider results.
+  - Section Density thins only that section, keeping its most important line on each voice.
+  - Velocity and the constant CC1 are now per part, from its section's Dynamics, and export writes each
+    part's own CC1.
+- **Presets** now carry patterns (per section or per instrument), Character and per-section slider values,
+  and your saved presets keep them.
+  - Full epic: strings on 8th ostinato, tenor and bass trombones and tuba on Half-time pulse.
+  - Low and heavy: strings on 8ths, low brass on stabs.
+  - The other presets stay on Sustain.
+- The reason line names the melody instrument and its doubling, the bass file or independent bass, and the
+  colour chords.
+- Undo/redo covers every new control: slots, patterns (section and part), per-section sliders, Character,
+  doubling, melody instrument, independent bass and re-strike.
+- Tests:
+  - `tests/test_motion.py`, plus a new `tests/data/v04_snapshot.json`. It holds every note (pitch, rhythm,
+    velocity) of A, B and C at v0.4 for all 12 files × presets × Forces/Density samples, and the defaults
+    must still match it exactly.
+  - Sweeps: every pattern in every section and approach, moderate mode, mixed per-section sliders, and
+    melody + bass on tests 1, 4 and 11 across seeds, every preset, A/B/C and Forces × Density.
+  - Also: keep-as-is with melody and bass, a walking-bass stress file with passing tones, the independent
+    bass, edits with files and patterns, and the new window controls.
+
+### Changed
+- Checker: a melody part no longer counts for the within-section spacing rule. A flute doubling the melody
+  an octave above the other woodwinds is standard epic writing, and this rule is about a section's chord.
+- Checker speed: the time slices are built in one sweep, so 16th patterns over 16 bars check quickly.
+- Problems only between your own inputs (kept voicing, locked parts, melody and bass files) are shown, not
+  discarded. Everything the generator adds is still clean.
+- **Regenerate unlocked** avoids the current result and the 7 variations before it, not just the last one. On
+  short progressions it used to bounce between two results (found by Sam).
+- The test run takes about 10 minutes on Windows (was 3:44) because of the new sweeps (about 410 tests).
+- `swap_leaps` moved into `generator.py` (`edits.py` re-exports it); `with_dynamics` now re-renders through
+  the new `rerender()`.
+
 ## v0.4 — Control (Milestone 4) — 2026-11-11
 
 ### Added

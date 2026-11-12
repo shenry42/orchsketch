@@ -120,7 +120,7 @@ def test_generate_grid_play_mute_export(app, tmp_path):
     assert w.checker_label.text() == "Checker: no problems."
     assert w.reason_label.text().startswith("A · Low and warm")
     cell = w.grid.item(w.grid.line_ids.index("vc"), 4).text()
-    assert cell == "A1"  # cellos on A2 (scientific) = A1 in Ableton names
+    assert cell == "A1 ♪"  # cellos on A2 (scientific) = A1 in Ableton names; ♪: Full epic's 8th ostinato
     w.grid.select_part("vc")
     assert w.piano.title == "Cellos" and w.piano.notes
 
@@ -244,4 +244,75 @@ def test_generate_runs_in_the_background(app, tmp_path):
     assert not w.generate_btn.isEnabled() and w.generate_btn.text() == "Generating…"
     w.wait_for_generation()
     assert w.orch is not None and all(o is not None for o in w.alts) and w.generate_btn.isEnabled()
+    w.close()
+
+
+def test_milestone_5_controls(app, tmp_path):
+    """Melody and bass slots, patterns (section scope, per part), per-section dynamics, Character, independent
+    bass, re-strike, presets with sections, and undo through all of it."""
+    notes = []
+    w = make_window(tmp_path, notes)
+    w.set_key("A", "minor")
+    assert w.load(DATA / "01_epic_staple.mid")
+    w.confirm_all()
+    assert not w.mel_inst_box.isEnabled() and w.indep_box.isEnabled()
+    assert w.load_part_file("melody", DATA / "01_epic_staple.melody.mid")
+    assert w.load_part_file("bass", DATA / "01_epic_staple.bass.mid")
+    assert w.slot_label["melody"].text() == "01_epic_staple.melody.mid" and w.mel_inst_box.isEnabled()
+    assert not w.indep_box.isEnabled()  # a bass file is loaded
+    o = w.generate()
+    assert "mel" in o.cells and "melody in the" in w.reason_label.text()
+    assert "bass line from your file" in o.reason and o.part("vc").notes[0].end < 960  # the file's rhythm
+    labels = w.grid.row_labels
+    assert labels["vc"].endswith("· bass file") and labels["vln2"].endswith("· 8ths")  # Full epic: strings 8ths
+    assert labels["tba"].endswith("bass file")  # tuba plays the file, not its preset half-time pulse
+    menu = w.build_part_menu("mel", 0)
+    regen = next(a for a in menu.actions() if a.text().startswith("Regenerate") and "only" in a.text())
+    assert not regen.isEnabled()
+    # patterns: brass section to 16ths applies at once (no Generate needed)
+    w.set_scope("brass")
+    i = w.pattern_box.findData("16ths")
+    w.pattern_box.setCurrentIndex(i)
+    w.pattern_box.activated.emit(i)
+    assert not w.dirty and len(w.orch.part("hn1").notes) > len(o.part("hn1").notes)
+    assert w.orch.cells == o.cells
+    # one part on its own pattern, then undo
+    w.set_part_pattern("hn2", "stabs")
+    assert [n.start for n in w.orch.part("hn2").notes][:2] == [0, 720]
+    w.undo()
+    assert len(w.orch.part("hn2").notes) == len(w.orch.part("hn1").notes)
+    # per-section dynamics: brass ff, strings stay mf
+    w.dynamics.setValue(5)
+    assert {n.velocity for n in w.orch.part("hn1").notes} <= {120, 96} and w.orch.cc1_for("vln2") == 80
+    assert "ff" in w.dynamics_label.text()
+    w.set_scope("all")
+    assert "differ" in w.dynamics_label.text()
+    # Character waits for Generate
+    w.character.setValue(1)
+    assert w.dirty and w.character_label.text().startswith("Moderate")
+    w.generate()
+    assert w.orch.mode == "moderate"
+    # remove the bass file: the independent bass becomes available
+    w.clear_part_file("bass")
+    assert w.indep_box.isEnabled() and w.bass_file is None
+    w.indep_box.setChecked(True)
+    w.generate()
+    assert w.orch.meta["info"].get("bass") == "independent"
+    w.undo()
+    w.undo()
+    w.undo()
+    assert w.bass_file is not None and not w.indep_box.isChecked()
+    # re-strike every bar applies at once
+    w.restrike_box.setChecked(True)
+    assert w.orch.settings.restrike_bars and not w.dirty
+    # presets keep per-section values and patterns
+    mine = w.save_current_preset("Brass loud")
+    assert dict(mine.patterns).get("brass") == "16ths" and ("brass", "dynamics", "ff") in mine.sections
+    w.set_preset("strings_only")
+    assert w.values["brass"]["dynamics"] == "mf" and w.values["strings"]["pattern"] == "sustain"
+    w.set_preset(mine.id)
+    assert w.values["brass"]["dynamics"] == "ff" and w.values["brass"]["pattern"] == "16ths"
+    assert w.values["strings"]["pattern"] == "8ths"
+    # a bad melody file is refused with a message
+    assert not w.load_part_file("melody", DATA / "01_epic_staple.mid") and "Can't use" in notes[-1][0]
     w.close()

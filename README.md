@@ -29,7 +29,9 @@ src/orchsketch/
   rules.py          low-interval limits, spacing/leap limits, check severities from data/rules.json
   checker.py        rule checker on plain note lists (SPEC §7), no UI
   generator.py      orchestration: approaches A/B/C, voices, candidate voicings, seeded voice-leading search,
-                    checker gate, keep-as-is, follow-input top voice, Forces/Density/Dynamics
+                    checker gate, keep-as-is, follow-input top voice, sliders (master and per section),
+                    moderate mode, melody and bass files, independent bass, pattern rendering with fallback
+  patterns.py       rhythm patterns (sustain, 8ths, 16ths, 16ths alternating, stabs, half-time)
   edits.py          lock + regenerate, regenerate one part / one chord, per-chord swap with leap flags
   history.py        undo/redo snapshots
   presets.py        ensemble presets (data/presets.json) and your own (Documents\OrchSketch\Presets)

@@ -1,8 +1,10 @@
 """Main window: load a chord clip, review/correct labels, generate, compare, edit, audition and export.
 
-Milestone 4 adds the three alternatives (tabs A/B/C, each with its one-line reason), locks and
+Milestone 4 added the three alternatives (tabs A/B/C, each with its one-line reason), locks and
 regeneration (unlocked parts, one part, one chord), per-chord and per-bar swaps with a neighbour re-check,
 undo/redo for every edit, the top-voice option, keep-as-is, the global sliders and presets.
+Milestone 5 adds the melody and bass file slots, rhythm patterns (per section, per part), moderate mode
+(Character slider), the independent bass, re-strike every bar, and per-section sliders (side panel scope).
 Generation of the three alternatives runs in the background so the window stays responsive.
 """
 from __future__ import annotations
@@ -11,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QSettings, Qt, QTimer, QUrl
+from PySide6.QtCore import QPoint, QSettings, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction, QActionGroup, QCursor, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QInputDialog, QLabel,
@@ -24,13 +26,14 @@ from ..analysis import AnalysisSession, ChordLabel, SymbolError, parse_symbol
 from ..checker import chords_from_session
 from ..edits import bar_chords, regenerate, regenerate_chord, regenerate_part, swap
 from ..export import EXPORT_ROOT, export_folder, export_part, export_parts
+from .. import patterns as pat
 from ..generator import (
-    APPROACH, APPROACHES, DENSITY_STEPS, DYNAMIC_STEPS, FORCES, TOP_INPUT, TOP_SMOOTH, GenerationError,
-    Orchestration, Settings, generate_all, with_dynamics,
+    APPROACH, APPROACHES, CHARACTERS, DENSITY_STEPS, DOUBLINGS, DYNAMIC_STEPS, FORCES, MELODY_HOSTS, TOP_INPUT,
+    TOP_SMOOTH, Ensemble, GenerationError, Orchestration, Settings, generate_all, rerender,
 )
 from ..history import History
 from ..instruments import SECTIONS, instruments
-from ..midi_io import InputError, read_chord_file, write_notes
+from ..midi_io import InputError, read_chord_file, read_monophonic_file, write_notes
 from ..playback.player import Player
 from ..playback.synth import SynthError
 from ..presets import DEFAULT_PRESET, USER_PRESETS, Preset, find, load_all, preset_id, save_preset
@@ -42,7 +45,55 @@ from .theme import MUTED
 DOCS = Path.home() / "Documents" / "OrchSketch"
 FORCE_NAMES = {"solo": "Solo", "section": "Section", "divisi": "Divisi"}
 DENSITY_NAMES = {1: "1 · sparse", 2: "2", 3: "3", 4: "4", 5: "5 · full"}
+CHARACTER_NAMES = {"safe": "Safe", "moderate": "Moderate"}
+DOUBLING_NAMES = {"auto": "Doubling: auto", "off": "Doubling: off", "up": "Doubling: 8va", "down": "Doubling: 8vb"}
 CUSTOM = "custom"
+ALL = "all"
+SLIDERS = ("character", "forces", "density", "dynamics")
+RENDER_KEYS = ("dynamics", "pattern")  # apply at once, without regenerating
+
+
+def default_values() -> dict:
+    return {sec: {"character": "safe", "forces": "section", "density": 5, "dynamics": "mf",
+                  "pattern": pat.SUSTAIN} for sec in SECTIONS}
+
+
+def freeze(d: dict) -> tuple:
+    return tuple(sorted((sec, k, v) for sec, vals in d.items() for k, v in vals.items()))
+
+
+def thaw(t: tuple) -> dict:
+    out = default_values()
+    for sec, k, v in t:
+        out[sec][k] = v
+    return out
+
+
+class DropButton(QPushButton):
+    """A button that also takes a dropped .mid file (the melody and bass slots)."""
+    file_dropped = Signal(str)
+
+    def __init__(self, text: str):
+        super().__init__(text)
+        self.setAcceptDrops(True)
+
+    @staticmethod
+    def _midi(e) -> str | None:
+        if e.mimeData().hasUrls():
+            for u in e.mimeData().urls():
+                if u.toLocalFile().lower().endswith((".mid", ".midi")):
+                    return u.toLocalFile()
+        return None
+
+    def dragEnterEvent(self, e):  # noqa: N802
+        if self._midi(e):
+            e.acceptProposedAction()
+
+    def dropEvent(self, e):  # noqa: N802
+        path = self._midi(e)
+        if path:
+            e.acceptProposedAction()
+            self.file_dropped.emit(path)
 
 
 @dataclass(frozen=True)
@@ -53,9 +104,15 @@ class EditState:
     mode: str = "minor"
     preset: str = DEFAULT_PRESET
     active: frozenset = frozenset()
-    forces: str = "section"
-    density: int = 5
-    dynamics: str = "mf"
+    values: tuple = ()  # per-section slider values and patterns (freeze())
+    ipatterns: tuple = ()  # instrument patterns from the preset
+    ppatterns: tuple = ()  # per-part patterns
+    restrike: bool = False
+    melody: tuple | None = None  # (file name, notes)
+    bass: tuple | None = None
+    mel_inst: str | None = None
+    mel_double: str = "auto"
+    independent: bool = False
     top_voice: str = TOP_SMOOTH
     keep: bool = False
     seed: int = 1
@@ -88,6 +145,12 @@ class MainWindow(QMainWindow):
         self.presets_folder = USER_PRESETS
         self.presets, problems = load_all(self.presets_folder)
         self.active: frozenset[str] = frozenset(find(self.presets, DEFAULT_PRESET).instruments)
+        self.values = default_values()  # per-section sliders and patterns
+        self.ipatterns: dict[str, str] = {}  # instrument -> pattern (presets)
+        self.ppatterns: dict[str, str] = {}  # line id -> pattern (part menu)
+        self.scope = ALL
+        self.melody_file: tuple | None = None  # (file name, notes)
+        self.bass_file: tuple | None = None
         self.history = History()
         self._restoring = False
         self.run_async = True  # tests set False: Generate then runs in the calling thread
@@ -137,6 +200,26 @@ class MainWindow(QMainWindow):
         self.redo_btn.clicked.connect(self.redo)
         for w in (self.open_btn, self.file_label):
             bar.addWidget(w)
+        bar.addSpacing(12)
+        self.slot_btn, self.slot_label, self.slot_clear = {}, {}, {}
+        for kind, text in (("melody", "Melody…"), ("bass", "Bass…")):
+            b = DropButton(text)
+            b.setToolTip(f"Open or drop a monophonic {kind} clip (same start as the chords). "
+                         + ("It goes to one instrument, and the harmony is voiced around it." if kind == "melody"
+                            else "The low strings, low brass and low winds double it in octaves."))
+            b.clicked.connect(lambda _=False, k=kind: self.open_part_dialog(k))
+            b.file_dropped.connect(lambda path, k=kind: self.load_part_file(k, path))
+            lab = QLabel("none")
+            lab.setStyleSheet(f"color: {MUTED};")
+            x = QToolButton()
+            x.setText("×")
+            x.setToolTip(f"Remove the {kind} file")
+            x.clicked.connect(lambda _=False, k=kind: self.clear_part_file(k))
+            x.setEnabled(False)
+            self.slot_btn[kind], self.slot_label[kind], self.slot_clear[kind] = b, lab, x
+            for w in (b, lab, x):
+                bar.addWidget(w)
+            bar.addSpacing(6)
         bar.addStretch(1)
         for label, w in (("Key", self.tonic), (None, self.mode), ("Tempo", self.tempo)):
             if label:
@@ -170,6 +253,25 @@ class MainWindow(QMainWindow):
         self.keep_box.setToolTip("Your input voicing is kept exactly as written, spread over the string lines "
                                  "low to high; everything else is orchestrated around it.")
         self.keep_box.toggled.connect(lambda _: self._setting_changed("Keep as-is"))
+        self.mel_inst_box = QComboBox()
+        self.mel_inst_box.setToolTip("Which instrument plays your melody (auto: chosen by register for each "
+                                     "alternative - A horns, B Violins I, C flute - with fallbacks)")
+        self.mel_inst_box.activated.connect(lambda _: self._setting_changed("Melody instrument"))
+        self.mel_double_box = QComboBox()
+        for d in DOUBLINGS:
+            self.mel_double_box.addItem(DOUBLING_NAMES[d], d)
+        self.mel_double_box.setToolTip("Melody octave doubling. Auto doubles at Density 4-5 "
+                                       "(A an octave down, B and C an octave up).")
+        self.mel_double_box.activated.connect(lambda _: self._setting_changed("Melody doubling"))
+        self.indep_box = QCheckBox("Independent bass")
+        self.indep_box.setToolTip("Moderate mode only: the bass moves by step toward the next chord's bass "
+                                  "instead of holding the chord's bass note. Needs Character at Moderate for "
+                                  "the sections playing the bass, and no bass file.")
+        self.indep_box.toggled.connect(lambda _: self._setting_changed("Independent bass"))
+        self.restrike_box = QCheckBox("Re-strike every bar")
+        self.restrike_box.setToolTip("Sustain: re-strike held notes at every bar line instead of tying them over "
+                                     "repeated chords. Applies at once.")
+        self.restrike_box.toggled.connect(self._restrike_toggled)
         self.seed = QSpinBox()
         self.seed.setRange(1, 9999)
         self.seed.setValue(1)
@@ -183,6 +285,9 @@ class MainWindow(QMainWindow):
         gen.addSpacing(16)
         gen.addWidget(self.top_box)
         gen.addWidget(self.keep_box)
+        gen.addSpacing(12)
+        for w in (self.mel_inst_box, self.mel_double_box, self.indep_box, self.restrike_box):
+            gen.addWidget(w)
         gen.addStretch(1)
         gen.addWidget(QLabel("Seed"))
         gen.addWidget(self.seed)
@@ -279,12 +384,21 @@ class MainWindow(QMainWindow):
         self.statusBar().addWidget(self.status_label, 1)
         self._menus()
         self._apply_preset_values(find(self.presets, DEFAULT_PRESET))
+        self._show_slots()
         self._refresh()
 
     def _slider_panel(self) -> QWidget:
-        box = QGroupBox("All sections")
-        box.setToolTip("Global sliders (per-section sliders come in Milestone 5)")
+        box = QGroupBox("Sliders")
+        box.setToolTip("Sliders for all sections at once, or for one section (SPEC §6)")
         form = QFormLayout(box)
+        self.scope_box = QComboBox()
+        self.scope_box.addItem("All sections", ALL)
+        for sec in SECTIONS:
+            self.scope_box.addItem(sec.capitalize(), sec)
+        self.scope_box.setToolTip("All sections: the master sliders move every section. Pick a section to set "
+                                  "its own values.")
+        self.scope_box.currentIndexChanged.connect(lambda _: self.set_scope(self.scope_box.currentData()))
+        form.addRow("Set", self.scope_box)
 
         def slider(n, tip):
             s = QSlider(Qt.Horizontal)
@@ -296,8 +410,9 @@ class MainWindow(QMainWindow):
             s.setMinimumWidth(150)
             return s
 
-        self.character = slider(2, "Character: Safe uses chord tones only. Moderate arrives in Milestone 5.")
-        self.character.setEnabled(False)
+        self.character = slider(len(CHARACTERS), "Character: Safe uses chord tones only. Moderate adds 9ths, "
+                                                 "sus and 6th colour in upper voices, passing tones in 8th/16th "
+                                                 "patterns, playable range (flagged yellow) and the independent bass.")
         self.character_label = QLabel("Safe")
         self.forces = slider(len(FORCES), "Forces: solo players, full sections, or sections with divisi splits")
         self.forces_label = QLabel("")
@@ -318,13 +433,30 @@ class MainWindow(QMainWindow):
             w = QWidget()
             w.setLayout(row)
             form.addRow(name, w)
-        self.forces.valueChanged.connect(lambda _: self._slider_moved("Forces"))
-        self.density.valueChanged.connect(lambda _: self._slider_moved("Density"))
-        self.dynamics.valueChanged.connect(self._dynamics_moved)
-        note = QLabel("Forces and Density take effect at the next Generate.\nDynamics applies at once.")
+        self.pattern_box = QComboBox()
+        for pt in pat.PATTERNS:
+            self.pattern_box.addItem(pat.PATTERN_NAMES[pt], pt)
+        self.pattern_box.setToolTip("Rhythm pattern for these sections (choirs sing Sustain, 8ths, stabs or "
+                                    "half-time). Right-click a part to give it its own. Applies at once.")
+        self.pattern_label = QLabel("")
+        self.pattern_label.setStyleSheet(f"color: {MUTED}; font-size: 11px;")
+        self.pattern_label.setWordWrap(True)
+        prow = QVBoxLayout()
+        prow.addWidget(self.pattern_box)
+        prow.addWidget(self.pattern_label)
+        pw = QWidget()
+        pw.setLayout(prow)
+        form.addRow("Pattern", pw)
+        self.character.valueChanged.connect(lambda v: self._slider_moved("character", CHARACTERS[v]))
+        self.forces.valueChanged.connect(lambda v: self._slider_moved("forces", FORCES[v]))
+        self.density.valueChanged.connect(lambda v: self._slider_moved("density", DENSITY_STEPS[v]))
+        self.dynamics.valueChanged.connect(lambda v: self._slider_moved("dynamics", DYNAMIC_STEPS[v]))
+        self.pattern_box.activated.connect(lambda _: self._slider_moved("pattern", self.pattern_box.currentData()))
+        note = QLabel("Character, Forces and Density take effect at the\nnext Generate. Dynamics and Pattern "
+                      "apply at once.")
         note.setStyleSheet(f"color: {MUTED}; font-size: 11px;")
         form.addRow(note)
-        box.setMaximumWidth(270)
+        box.setMaximumWidth(290)
         return box
 
     def _menus(self):
@@ -367,7 +499,7 @@ class MainWindow(QMainWindow):
         h = self.menuBar().addMenu("&Help")
         a = QAction("&About", self)
         a.triggered.connect(lambda: QMessageBox.about(
-            self, "OrchSketch", f"OrchSketch {__version__}\nMilestone 4: control."))
+            self, "OrchSketch", f"OrchSketch {__version__}\nMilestone 5: motion."))
         h.addAction(a)
 
     def _fill_tonics(self, current: str):
@@ -399,10 +531,28 @@ class MainWindow(QMainWindow):
     def approach(self) -> str:
         return APPROACHES[self.tab]
 
+    def _master_and_overrides(self, key: str):
+        """The master value (all sections equal) and per-section overrides (only when they differ)."""
+        vals = {sec: self.values[sec][key] for sec in SECTIONS}
+        if len(set(vals.values())) == 1:
+            return next(iter(vals.values())), ()
+        common = max(set(vals.values()), key=lambda v: (list(vals.values()).count(v), str(v)))
+        return common, tuple((sec, v) for sec, v in vals.items() if v != common)
+
+    def render_settings(self) -> dict:
+        """Settings fields that apply at once (no regeneration): dynamics, patterns, re-strike."""
+        dyn, sdyn = self._master_and_overrides("dynamics")
+        ptn, sptn = self._master_and_overrides("pattern")
+        return dict(dynamics=dyn, section_dynamics=sdyn, pattern=ptn, section_patterns=sptn,
+                    instrument_patterns=tuple(sorted(self.ipatterns.items())),
+                    part_patterns=tuple(sorted(self.ppatterns.items())), restrike_bars=self.restrike_box.isChecked())
+
     def gen_settings(self) -> Settings:
-        from ..generator import Ensemble
-        ens = Ensemble(instruments=self.active, forces=FORCES[self.forces.value()],
-                       density=DENSITY_STEPS[self.density.value()])
+        forces, sforces = self._master_and_overrides("forces")
+        density, sdensity = self._master_and_overrides("density")
+        character, schar = self._master_and_overrides("character")
+        ens = Ensemble(instruments=self.active, forces=forces, density=density, section_forces=sforces,
+                       section_density=sdensity)
         tops: tuple = ()
         keep = None
         if self.session is not None:
@@ -410,14 +560,23 @@ class MainWindow(QMainWindow):
             tops = tuple(max(v) if v else None for v in voicings)
             if self.keep_box.isChecked():
                 keep = tuple(voicings)
-        return Settings(ens, self.top_box.currentData(), tops, keep, DYNAMIC_STEPS[self.dynamics.value()])
+        return Settings(ens, self.top_box.currentData(), tops, keep, character=character, section_character=schar,
+                        melody=self.melody_file[1] if self.melody_file else None,
+                        bass=self.bass_file[1] if self.bass_file else None,
+                        melody_instrument=self.mel_inst_box.currentData(),
+                        melody_double=self.mel_double_box.currentData() or "auto",
+                        independent_bass=self.indep_box.isChecked() and self.bass_file is None,
+                        **self.render_settings())
 
     # ------------------------------------------------------------------ undo / redo
     def snapshot(self) -> EditState:
         labels = tuple((r.correction, r.confirmed) for r in self.session.results) if self.session else ()
         return EditState(labels, self.tonic.currentText(), self.mode.currentText(),
-                         self.preset_box.currentData() or CUSTOM, self.active, FORCES[self.forces.value()],
-                         DENSITY_STEPS[self.density.value()], DYNAMIC_STEPS[self.dynamics.value()],
+                         self.preset_box.currentData() or CUSTOM, self.active, freeze(self.values),
+                         tuple(sorted(self.ipatterns.items())), tuple(sorted(self.ppatterns.items())),
+                         self.restrike_box.isChecked(), self.melody_file, self.bass_file,
+                         self.mel_inst_box.currentData(), self.mel_double_box.currentData() or "auto",
+                         self.indep_box.isChecked(),
                          self.top_box.currentData(), self.keep_box.isChecked(), self.seed.value(),
                          tuple(self.alts), tuple(self.locks), self.tab, self.dirty)
 
@@ -442,7 +601,8 @@ class MainWindow(QMainWindow):
         self._restoring = True
         try:
             blocked = (self.tonic, self.mode, self.preset_box, self.forces, self.density, self.dynamics,
-                       self.top_box, self.keep_box, self.seed, self.tabs)
+                       self.character, self.pattern_box, self.top_box, self.keep_box, self.seed, self.tabs,
+                       self.restrike_box, self.indep_box, self.mel_inst_box, self.mel_double_box)
             for w in blocked:
                 w.blockSignals(True)
             self.mode.setCurrentText(st.mode)
@@ -454,9 +614,15 @@ class MainWindow(QMainWindow):
                     r.correction, r.confirmed = corr, conf
             self._fill_presets(st.preset)
             self.active = st.active
-            self.forces.setValue(FORCES.index(st.forces))
-            self.density.setValue(DENSITY_STEPS.index(st.density))
-            self.dynamics.setValue(DYNAMIC_STEPS.index(st.dynamics))
+            self.values = thaw(st.values)
+            self.ipatterns, self.ppatterns = dict(st.ipatterns), dict(st.ppatterns)
+            self.restrike_box.setChecked(st.restrike)
+            self.melody_file, self.bass_file = st.melody, st.bass
+            self.indep_box.setChecked(st.independent)
+            self._fill_melody_instruments(st.mel_inst)
+            self.mel_double_box.setCurrentIndex(max(0, self.mel_double_box.findData(st.mel_double)))
+            self._show_scope_values()
+            self._show_slots()
             self.top_box.setCurrentIndex(self.top_box.findData(st.top_voice))
             self.keep_box.setChecked(st.keep)
             self.seed.setValue(st.seed)
@@ -464,7 +630,6 @@ class MainWindow(QMainWindow):
             for w in blocked:
                 w.blockSignals(False)
             self.alts, self.locks, self.tab, self.dirty = list(st.alts), list(st.locks), st.tab, st.dirty
-            self._update_slider_labels()
             self._show_current()
         finally:
             self._restoring = False
@@ -657,26 +822,27 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ presets, parts, sliders
     def _apply_preset_values(self, p: Preset):
-        for w in (self.forces, self.density, self.dynamics):
-            w.blockSignals(True)
-        self.forces.setValue(FORCES.index(p.forces))
-        self.density.setValue(DENSITY_STEPS.index(p.density))
-        self.dynamics.setValue(DYNAMIC_STEPS.index(p.dynamics))
-        for w in (self.forces, self.density, self.dynamics):
-            w.blockSignals(False)
+        sp = p.section_patterns()
+        for sec in SECTIONS:
+            for k in SLIDERS:
+                self.values[sec][k] = p.section_value(sec, k)
+            self.values[sec]["pattern"] = sp.get(sec, pat.SUSTAIN)
+        self.ipatterns = p.instrument_patterns()
+        self.ppatterns = {}
         self.active = frozenset(p.instruments)
-        self._update_slider_labels()
+        self._fill_melody_instruments(self.mel_inst_box.currentData() if hasattr(self, "mel_inst_box") else None)
+        self._show_scope_values()
 
     def set_preset(self, pid: str):
         p = find(self.presets, pid)
         if p is None:
             return
         self._fill_presets(pid)
-        old_dyn = DYNAMIC_STEPS[self.dynamics.value()]
+        old = self.render_settings()
         self._apply_preset_values(p)
         self.dirty = True
-        if DYNAMIC_STEPS[self.dynamics.value()] != old_dyn:
-            self._apply_dynamics()
+        if self.render_settings() != old:
+            self._apply_render()
         self.record(f"Preset {p.name}")
         self._refresh()
 
@@ -711,6 +877,7 @@ class MainWindow(QMainWindow):
             if frozenset(p.instruments) == self.active:
                 self._fill_presets(p.id)
                 break
+        self._fill_melody_instruments(self.mel_inst_box.currentData())
         self.dirty = True
         self.record(f"{'Add' if on else 'Remove'} {instruments()[inst_id].name}")
         self._refresh()
@@ -721,22 +888,97 @@ class MainWindow(QMainWindow):
             self.save_current_preset(name.strip())
 
     def save_current_preset(self, name: str) -> Preset:
-        p = Preset(preset_id(name), name, tuple(sorted(self.active)), FORCES[self.forces.value()],
-                   DENSITY_STEPS[self.density.value()], DYNAMIC_STEPS[self.dynamics.value()])
+        master = {k: self._master_and_overrides(k)[0] for k in SLIDERS}
+        sections = tuple(sorted((sec, k, self.values[sec][k]) for sec in SECTIONS for k in SLIDERS
+                                if self.values[sec][k] != master[k]))
+        patterns = {sec: self.values[sec]["pattern"] for sec in SECTIONS if self.values[sec]["pattern"] != pat.SUSTAIN}
+        patterns.update(self.ipatterns)
+        p = Preset(preset_id(name), name, tuple(sorted(self.active)), master["forces"], master["density"],
+                   master["dynamics"], master["character"], patterns=tuple(sorted(patterns.items())),
+                   sections=sections)
         path = save_preset(p, self.presets_folder)
         self.presets, _ = load_all(self.presets_folder)
         self._fill_presets(p.id)
         self.statusBar().showMessage(f"Saved preset {name} to {path}", 10000)
         return p
 
-    def _update_slider_labels(self):
-        self.forces_label.setText(FORCE_NAMES[FORCES[self.forces.value()]])
-        self.density_label.setText(DENSITY_NAMES[DENSITY_STEPS[self.density.value()]])
-        self.dynamics_label.setText(DYNAMIC_STEPS[self.dynamics.value()])
+    # ------------------------------------------------------------------ sliders (all sections or one)
+    def scope_sections(self) -> list[str]:
+        return list(SECTIONS) if self.scope == ALL else [self.scope]
 
-    def _slider_moved(self, name: str):
-        self._update_slider_labels()
-        self._setting_changed(name)
+    def set_scope(self, scope: str):
+        self.scope = scope or ALL
+        if self.scope_box.currentData() != self.scope:
+            self.scope_box.blockSignals(True)
+            self.scope_box.setCurrentIndex(self.scope_box.findData(self.scope))
+            self.scope_box.blockSignals(False)
+        self._show_scope_values()
+
+    def _scope_value(self, key: str):
+        vals = [self.values[sec][key] for sec in self.scope_sections()]
+        return vals[0], len(set(vals)) > 1
+
+    def _show_scope_values(self):
+        """Show the scope's values on the sliders (\"mixed\" when the sections differ)."""
+        if not hasattr(self, "character"):
+            return
+        for key, w, steps, names, lab in (
+                ("character", self.character, CHARACTERS, CHARACTER_NAMES, self.character_label),
+                ("forces", self.forces, FORCES, FORCE_NAMES, self.forces_label),
+                ("density", self.density, DENSITY_STEPS, DENSITY_NAMES, self.density_label),
+                ("dynamics", self.dynamics, DYNAMIC_STEPS, {d: d for d in DYNAMIC_STEPS}, self.dynamics_label)):
+            v, mixed = self._scope_value(key)
+            w.blockSignals(True)
+            w.setValue(steps.index(v))
+            w.blockSignals(False)
+            lab.setText(names[v] + ("  (sections differ)" if mixed else ""))
+        v, mixed = self._scope_value("pattern")
+        self.pattern_box.blockSignals(True)
+        self.pattern_box.setCurrentIndex(self.pattern_box.findData(v))
+        self.pattern_box.blockSignals(False)
+        extra = []
+        if mixed:
+            extra.append("sections differ")
+        insts = instruments()
+        own = sorted({insts[i].name for i in self.ipatterns if insts[i].section in self.scope_sections()})
+        if own:
+            extra.append("own pattern: " + ", ".join(own))
+        if self.ppatterns:
+            extra.append(f"{len(self.ppatterns)} part(s) set by hand")
+        self.pattern_label.setText(" · ".join(extra))
+
+    def _update_slider_labels(self):
+        self._show_scope_values()
+
+    def _slider_moved(self, key: str, value):
+        if self._restoring:
+            return
+        secs = self.scope_sections()
+        if all(self.values[sec][key] == value for sec in secs) and not (
+                key == "pattern" and (self.ipatterns or self.ppatterns)):
+            self._show_scope_values()
+            return
+        for sec in secs:
+            self.values[sec][key] = value
+        insts = instruments()
+        if key == "pattern":  # a section pattern replaces the preset's instrument patterns and your part ones
+            self.ipatterns = {i: v for i, v in self.ipatterns.items() if insts[i].section not in secs}
+            for o in self.alts:
+                if isinstance(o, Orchestration):
+                    for ln in o.lines:
+                        if insts[ln.instrument].section in secs:
+                            self.ppatterns.pop(ln.id, None)
+        where = "" if self.scope == ALL else f" ({self.scope})"
+        name = {"character": "Character", "forces": "Forces", "density": "Density", "dynamics": "Dynamics",
+                "pattern": "Pattern"}[key]
+        shown = pat.PATTERN_NAMES[value] if key == "pattern" else CHARACTER_NAMES.get(value, value)
+        self._show_scope_values()
+        if key in RENDER_KEYS:
+            self._apply_render()
+            self.record(f"{name} {shown}{where}")
+            self._refresh()
+        else:
+            self._setting_changed(f"{name} {shown}{where}")
 
     def _setting_changed(self, name: str):
         """A generation setting changed: it takes effect at the next Generate."""
@@ -746,18 +988,98 @@ class MainWindow(QMainWindow):
         self.record(name)
         self._refresh()
 
-    def _dynamics_moved(self, _):
-        self._update_slider_labels()
+    def _restrike_toggled(self, on: bool):
         if self._restoring:
             return
-        self._apply_dynamics()
-        self.record(f"Dynamics {DYNAMIC_STEPS[self.dynamics.value()]}")
+        self._apply_render()
+        self.record("Re-strike every bar" if on else "Hold ties")
+        self._refresh()
 
-    def _apply_dynamics(self):
-        dyn = DYNAMIC_STEPS[self.dynamics.value()]
-        self.alts = [with_dynamics(o, dyn) if isinstance(o, Orchestration) else o for o in self.alts]
+    def set_part_pattern(self, line_id: str, pattern: str | None):
+        """Give one part its own pattern (None: back to its section's)."""
+        if pattern is None:
+            self.ppatterns.pop(line_id, None)
+        else:
+            self.ppatterns[line_id] = pattern
+        self._apply_render()
+        label = self.orch.line(line_id).label if self.orch else line_id
+        self.record(f"{label}: " + (pat.PATTERN_NAMES[pattern] if pattern else "section pattern"))
+        self._show_scope_values()
+        self._refresh()
+
+    def _apply_render(self):
+        """Apply dynamics, patterns and re-strike to every alternative at once (no regeneration)."""
+        rs = self.render_settings()
+        self.alts = [rerender(o, replace(o.settings, **rs)) if isinstance(o, Orchestration) else o
+                     for o in self.alts]
+        if self.orch is not None:
+            self._show_current()
         if self.orch is not None and self.player is not None and self.player.seq is not None:
             self._load_player()
+
+    def _apply_dynamics(self):
+        self._apply_render()
+
+    # ------------------------------------------------------------------ melody and bass files
+    def _fill_melody_instruments(self, current: str | None):
+        if not hasattr(self, "mel_inst_box"):
+            return
+        insts = instruments()
+        hosts = list(dict.fromkeys(i for a in APPROACHES for i in MELODY_HOSTS[a]))
+        self.mel_inst_box.blockSignals(True)
+        self.mel_inst_box.clear()
+        self.mel_inst_box.addItem("Melody: auto", None)
+        for iid in hosts:
+            if iid in self.active:
+                self.mel_inst_box.addItem(f"Melody: {insts[iid].name}", iid)
+        idx = self.mel_inst_box.findData(current)
+        self.mel_inst_box.setCurrentIndex(idx if idx >= 0 else 0)
+        self.mel_inst_box.blockSignals(False)
+
+    def open_part_dialog(self, kind: str):
+        path, _ = QFileDialog.getOpenFileName(self, f"Open {kind} MIDI", str(Path.home()), "MIDI files (*.mid *.midi)")
+        if path:
+            self.load_part_file(kind, path)
+
+    def load_part_file(self, kind: str, path) -> bool:
+        """Load a melody or bass file into its slot (monophonic, starts with the chords)."""
+        try:
+            clip = read_monophonic_file(path, kind.capitalize())
+        except InputError as exc:
+            self.notify("Can't use this file", str(exc))
+            return False
+        entry = (Path(path).name, tuple(clip.notes))
+        if kind == "melody":
+            self.melody_file = entry
+        else:
+            self.bass_file = entry
+        if self.session is not None and clip.notes and max(n.end for n in clip.notes) > self.session.clip.length:
+            self.statusBar().showMessage(f"The {kind} file is longer than the chords: notes after bar "
+                                         f"{self.session.clip.bars} are left out.", 10000)
+        self._show_slots()
+        self._setting_changed(f"{kind.capitalize()} file {Path(path).name}")
+        return True
+
+    def clear_part_file(self, kind: str):
+        if (self.melody_file if kind == "melody" else self.bass_file) is None:
+            return
+        if kind == "melody":
+            self.melody_file = None
+        else:
+            self.bass_file = None
+        self._show_slots()
+        self._setting_changed(f"Remove {kind} file")
+
+    def _show_slots(self):
+        for kind, entry in (("melody", self.melody_file), ("bass", self.bass_file)):
+            lab = self.slot_label[kind]
+            lab.setText(entry[0] if entry else "none")
+            lab.setStyleSheet("" if entry else f"color: {MUTED};")
+            self.slot_clear[kind].setEnabled(entry is not None)
+        has_mel = self.melody_file is not None
+        self.mel_inst_box.setEnabled(has_mel)
+        self.mel_double_box.setEnabled(has_mel)
+        self.indep_box.setEnabled(self.bass_file is None)
 
     # ------------------------------------------------------------------ display
     def _refresh(self):
@@ -1050,8 +1372,28 @@ class MainWindow(QMainWindow):
         a.triggered.connect(lambda: self.grid.lock_buttons[line_id].setChecked(not locked)
                             if line_id in self.grid.lock_buttons else self.set_lock(line_id, not locked))
         a = menu.addAction(f"Regenerate {ln.label} only")
-        a.setEnabled(not locked and bool(o.part(line_id).notes))
+        a.setEnabled(not locked and bool(o.part(line_id).notes) and line_id not in o.figures)
         a.triggered.connect(lambda: self.regenerate_one_part(line_id))
+        sec = instruments()[ln.instrument].section
+        if line_id in o.figures:
+            a = menu.addAction("Pattern: plays your " + ("melody" if ln.role == "melody" else "bass") + " file's rhythm")
+            a.setEnabled(False)
+        else:
+            sub = menu.addMenu("Pattern")
+            section_pt = self.values[sec]["pattern"]
+            own = self.ppatterns.get(line_id)
+            d = sub.addAction(f"Section's pattern ({pat.PATTERN_NAMES[self.ipatterns.get(ln.instrument, section_pt)]})")
+            d.setCheckable(True)
+            d.setChecked(own is None)
+            d.triggered.connect(lambda _=False: self.set_part_pattern(line_id, None))
+            sub.addSeparator()
+            for pt in pat.PATTERNS:
+                if not pat.allowed(pt, sec == "choir"):
+                    continue
+                act = sub.addAction(pat.PATTERN_NAMES[pt])
+                act.setCheckable(True)
+                act.setChecked(own == pt)
+                act.triggered.connect(lambda _=False, x=pt: self.set_part_pattern(line_id, x))
         if index >= 0:
             menu.addSeparator()
             sub = self.build_column_menu(index)

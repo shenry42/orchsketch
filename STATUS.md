@@ -4,33 +4,52 @@
 > The chat that finishes a milestone updates this file before it ends.
 
 ## Current state
-- **Version:** v0.4
-- **Last milestone completed:** 4 — Control
-- **Next milestone:** 5 — Motion (SPEC.md §10)
+- **Version:** v0.5
+- **Last milestone completed:** 5 — Motion
+- **Next milestone:** 6 — Finish (SPEC.md §10)
 - **Repo:** https://github.com/shenry42/orchsketch
-- **Last updated:** 2026-11-11 (Milestone 4)
+- **Last updated:** 2026-11-11 (Milestone 5)
 
 ## Milestones
 - [x] 1 — v0.1 Read and label (+ packaging spike, audio test with Ableton open)
 - [x] 2 — v0.2 Data and checker (range + low-interval tables cross-checked)
 - [x] 3 — v0.3 First orchestration (safe mode, grid, playback, per-part export)
 - [x] 4 — v0.4 Control (A/B/C alternatives, lock, swap, undo, global sliders, presets)
-- [ ] 5 — v0.5 Motion (patterns, bass, melody, moderate mode, per-section sliders)
+- [x] 5 — v0.5 Motion (patterns, bass, melody, moderate mode, per-section sliders)
 - [ ] 6 — v1.0 Finish (projects, full export, .exe, full test-set pass, Ableton check)
 
 ## Test results (latest run)
-- Automated tests: 322 passed / 0 failed (Claude's Linux workspace, about 3 min; Windows run via `release.bat`).
+- Automated tests: 0 failed. Windows: 407 passed in 10:10 (`run_tests.bat`, before the Regenerate fix, which
+  adds 3 tests; `release.bat` reruns them). Claude's workspace: 398 passed, 1 skipped (music21 not installed
+  there), 6:56.
 - Chord labels on 12-file test set: 12/12 correct, every chord as the best guess (unchanged since Milestone 1).
 - Checker errors in generated output: **0**.
-  - Approach A gives exactly the v0.3 notes on all 216 Milestone 3 runs (12 files × seeds 1–3 plus all 15
-    section combinations) and still has 0 warnings of any kind.
-  - B and C: the same 432 runs, with 0 errors and 0 warnings.
-  - Every preset × A/B/C × 12 files, Forces × Density samples, follow input and keep-as-is: 0 errors and 0
-    `generator_must_pass` warnings (some allowed parallel warnings; see Known issues).
-- Speed: all three alternatives for 16 bars take about 1.8 s in Claude's workspace (one took 1.9 s before
-  Milestone 4) and run in the background.
-- Ear-test ratings (tests/ratings.csv): test 1 A/B/C all 5/5 (Sam, v0.4: "a little basic/generic for now,
-  room to grow"). The formal pass over all test files is in Milestone 6.
+  - Approach A gives exactly the v0.3 notes on all 216 Milestone 3 runs and still has 0 warnings of any kind.
+  - **v0.4 notes unchanged:** with Milestone 5's defaults (Sustain, safe, no files, equal sections) every note
+    (pitch, rhythm, velocity) of A, B and C equals v0.4 for 12 files × every preset line-up, plus Forces ×
+    Density samples for A (`tests/data/v04_snapshot.json`).
+  - B and C: all 12 files × seeds 1–3 × 15 section combinations, 0 errors and 0 warnings (as in v0.4).
+  - New sweeps, all with 0 errors and 0 `generator_must_pass` warnings:
+    - Every pattern in every section (rotated) and everywhere, for A/B/C on all 12 files. Patterns add no
+      parallels.
+    - Moderate mode on all 12 files × A/B/C, with and without 8ths, plus section combinations and moderate
+      in one section only. Colour tones land on about 45% of chords.
+    - Mixed per-section Forces/Density/Character.
+    - Melody + bass on tests 1, 4 and 11: alone and together, seeds 1–2, every preset (with its patterns),
+      Forces × Density with moderate and 8ths, and keep-as-is.
+    - A walking bass file with passing tones (tests 1, 8 and 11) across every preset.
+    - The independent bass on all 12 files.
+    - Edits (lock, regenerate, chord, part, swap) with files and patterns.
+- Speed: all three alternatives for 16 bars take about 2 s (melody, bass, moderate and patterns all on: about
+  3 s), in the background.
+- Ear-test ratings (tests/ratings.csv):
+  - v0.4: test 1 A/B/C all 5/5.
+  - v0.5: tests 1, 4 and 11 with melody + bass files, A/B/C all 4/5 (Sam: "everything is working; patterns
+    fairly generic, room for improvement"). The formal pass over all test files is in Milestone 6.
+- Milestone 5 manual checks (Sam, 2026-11-11): melody and bass slots, Generate A/B/C, brass section pattern
+  live, part pattern menu, Character Moderate, independent bass, Export parts: all pass ("everything is
+  working"). Sam found *Regenerate unlocked* bouncing between two results on short progressions; fixed (it now
+  avoids the last 8 variations).
 - Milestone 4 manual checks (Sam, 2026-11-11): tabs and reasons, lock + Regenerate unlocked, chord-header
   swap with Ctrl+Z/Ctrl+Y, Regenerate Horn 2 only, Dynamics live, Density → orange Generate, Low and heavy,
   keep-as-is + follow input, export names `_B.mid`: all pass ("Everything is working").
@@ -50,17 +69,21 @@
 - Chords over a non-chord bass show the Roman numeral as numeral + "/bass" (e.g. *Bb/C · VII/C*). Provisional notation; revisit if it reads badly.
 - Diminished 7ths are named from the bass note (symmetrical chord): B–D–F–G# with B lowest reads *Bdim7 · ii°7*, not *vii°65*. The alternatives and typed correction cover it.
 - Corrections only last while the app is open. Saving them is part of projects (Milestone 6).
-- Melody and bass files: the reader exists and is tested, but there are no UI slots yet. They are first used in Milestone 5.
+- Melody and bass files only last while the app is open (like corrections); projects save them (Milestone 6).
 - Ensemble edits: per-project player counts (SPEC §4 "counts editable per project") are covered by the Forces slider and Parts…
   on/off for now; exact counts per instrument come with projects.
-- Generator speed: all three alternatives for 16 bars take about 1.8 s in the background. The test run is about 3 minutes, most
-  of it the generator sweeps. If it gets slower, cache candidates per chord and share them between A/B/C.
+- Generator speed: all three alternatives for 16 bars take about 2–3 s in the background. The test run is
+  about 10 minutes on Windows (was 3:44), most of it the generator sweeps. If it gets slower, cache
+  candidates per chord and share them between A/B/C, or move the heaviest sweeps behind a pytest marker.
 - Allowed parallel warnings (never errors), all expected:
   - Follow input copies parallel 5ths or octaves between your clip's top and bass, and each one is
     reported once per pair of doubling parts.
   - Keep-as-is: model parts doubling your kept notes by pitch class aren't linked to them (only to your
     bass), so their parallels show.
   - C on test 12 (power chords) at Forces Solo or Density 3–4.
+  - Melody against the bass: parallel octaves where your melody lands on chord roots while the bass moves by
+    root (the bass voice sits in one octave, E2–Eb3, so its direction is often forced). With a bass file they
+    come from your two files.
 - Your own edits can break rules: a swap can give the choir a leap of more than an octave, and a kept
   voicing can have its own rule problems. The cells turn red, and generated output itself never has
   errors. Keep-as-is notes outside the strings' playable range (below E1) are kept and flagged red.
@@ -72,10 +95,25 @@
   scored as a small cost. Tenor trombone 2 and bassoon 1 only play when there is an open 5th (root-position chords with a perfect 5th)
   and rest otherwise.
 - Tuba is in the low octave except on E chords (E1 is below its comfortable F1), where it plays E2 with the cellos.
+- Patterns (Sam, v0.5): "fairly generic, room for improvement". More and richer patterns are Phase 2
+  (SPEC §11). Ideas: pattern variations per approach, accents following the harmonic rhythm, ostinato shapes
+  (root–5th–octave), string 16ths on two pitches across sections, and "pad" sustains under ostinatos.
+- Patterns are checked chord by chord; a pattern falls back to Sustain for a part at a chord where it would
+  break a rule (16ths alternating does this on about 18% of chords). Parallels inside patterns are not checked
+  (only at chord changes).
+- Parts that play your melody or bass file keep the file's rhythm; section patterns don't apply to them.
+- A melody plan that can't be voiced falls back quietly (same instrument without doubling, then the next
+  instrument); the reason line says what was used. Example: approach A with an octave-up flute doubling
+  over the low A woodwinds needed the melody spacing exemption (see Decisions).
+- Problems only between your own inputs (kept voicing, locked parts, melody, bass file) are shown, not
+  discarded, e.g. your kept voicing and your melody both on the leading tone (a doubled-outer warning).
+- Bass-file mode: lines that can't play the file in any octave rest; the choir bass keeps the chord's bass
+  only if singing the line would need a leap over an octave.
+- *Generate* with unchanged settings and seed gives the same result by design; use *Regenerate unlocked*
+  or another seed for new variations.
 - Out of scope, noted for later:
-  - Milestone 5: rhythm patterns, the re-strike-every-bar toggle, melody/bass slots, moderate mode (the
-    Character slider is shown locked at Safe), per-section sliders, per-part role overrides, and roles and
-    patterns in presets.
+  - Per-part role overrides beyond the melody instrument (SPEC §5 step 1: "you can override them"), and
+    roles in presets. Sam chose melody-instrument only for Milestone 5.
   - Milestone 6: the combined divisi file, the full-score type-1 file, projects (they also save locks,
     swaps and corrections; undo history only lasts while the app is open).
   - Not yet built: keep-as-is in other sections (only strings for now) and the SSAATTBB choir layout.
@@ -148,20 +186,85 @@
   - Parallel cost: A 8 (as in Milestone 3), B and C 16.
   - Each approach has its own octave and rest table and lead order.
 
+- **Milestone 5 decisions (Sam):** built-in presets carry patterns (Full epic: strings 8ths, tenor/bass
+  trombones and tuba half-time; Low and heavy: strings 8ths, low brass stabs; the rest Sustain). Roles:
+  only the melody instrument is choosable; full role overrides later. Melody doubling Auto + manual. Parts
+  playing the bass file keep the file's rhythm.
+- **Milestone 5 decisions (Claude's calls):**
+  - *Patterns* (`patterns.py`): every pattern strikes at the chord start. Unaccented 8ths/16ths are at 80%
+    velocity (8ths accented on beats 1 and 3, 16ths on every beat). Stabs are an 8th long, half-time hits a
+    quarter. 16ths alternating uses the next chord tone at least a minor 3rd below (else above) and always
+    ends on the part's own note. Choirs sing Sustain, 8ths, stabs or half-time only.
+  - *Pattern priority:* part override > preset instrument pattern > section > master. Picking a section
+    pattern clears that section's instrument and part patterns.
+  - *Pattern safety net* (`generator._render`): per chord, compared with plain Sustain. A new problem →
+    drop the passing tones → the named parts sustain → every patterned part sustains. A passing tone is
+    also dropped where it adds parallels at the chord change.
+  - *Moderate:*
+    - Colour tones: a diatonic 9th, a 4th (not over a major 3rd) or a 6th, never on dim/aug/m7b5/dim7. At
+      most one per chord, in one upper voice whose lines are all in moderate sections, never a semitone from
+      another voice. `COLOUR_COST` 1.3 gives about 45% of chords.
+    - Playable range only as a fallback when no comfortable octave exists (+0.5 cost per note, flagged
+      yellow).
+    - Passing tones only when a part moves by a 3rd, on the last 8th of the chord.
+    - The checker runs in moderate mode when any section is moderate; safe sections still stay comfortable
+      and on chord tones.
+  - *Per-section sliders:* `Ensemble.section_forces/section_density` and `Settings.section_*` override the
+    master. Section Density: lines kept as for the highest k, then a section with a lower k keeps its own k
+    most important lines per voice (equal values = the old rule exactly). The UI sends no overrides when all
+    sections are equal.
+  - *Bass file:*
+    - The line is moved by octaves so it best fits the bass window (E2–Eb3). Each bass line uses the first
+      of its octaves that fits at least 2/3 of the notes, and notes outside its range move by an octave.
+    - The bass trombone takes the lower octave first (SPEC).
+    - The bass voice is pinned to the file's note at each chord start (a silent start is filled with the
+      chord's bass note), and the open 5th may rest (cost 0.6).
+    - The choir bass sings the line too (see Known issues).
+    - Bassoon 2 and contrabassoon double it as well (they're on the bass voice).
+  - *Melody:*
+    - Host lists per approach are `generator.MELODY_HOSTS` (A horn, Violins I, clarinet…; B Violins I,
+      horn, flute…; C flute, Violins I, trumpet…), at pitch first, then an octave down/up.
+    - The melody replaces the host's top harmony line; a choir host needs no leaps over an octave; with
+      keep-as-is the strings can't host.
+    - Doubling hosts are `DOUBLE_HOSTS`; an octave-down doubling stays at G3 or above.
+    - Up to 4 plans are tried (host ± doubling, next host).
+    - Harmony above the melody's lowest note in a chord costs 0.3 per semitone, and the search counts
+      parallels of every model line against the melody.
+  - *Independent bass:* active only when every bass-voice section is moderate and there's no bass file. It
+    places the chord's bass nearest the previous note in E2–Eb3; on chords of a half note or more, the last
+    one or two diatonic steps toward the next bass (quarters on chords of a bar or more, else 8ths). If a
+    chord can't be voiced with them, that chord holds the bass.
+  - *Checker:* a part with role `melody` is left out of the within-section spacing rule (SPEC §5a), so a
+    melody doubled high in the flutes over the other woodwinds is possible.
+  - *Ownership:* the final gate treats issues only among fixed parts (kept voicing, locks, melody, bass
+    file) as the user's (shown); everything else must be clean.
+  - *Regenerate unlocked* avoids the current result and the 7 before it (`meta["previous"]`,
+    `REGEN_MEMORY` 8), not just the last one (Sam saw it bounce between two).
+  - Per-part CC1 = the part's section Dynamics (`Orchestration.cc1_for`); export writes it.
+  - Melody export code `{Inst}-mel`, doubling `{Inst}-mel8va` / `-mel8vb`; line ids `mel` and `mel-8`.
+
 ## Notes for the next chat
-- Milestone 5:
-  - **Patterns:** they go after the path search (SPEC §5 step 5). The checker already follows each part's
-    top note and checks parallels at chord changes only.
-  - **Moderate mode:** it needs `_candidates` to allow 9ths, sus and 6ths in upper voices, and `generate()`
-    to accept mode="moderate". The Character slider is already in the window, disabled.
-  - **Per-section sliders:** they can feed `Ensemble` per section. Density and Forces are applied in
-    `approach_lines()` / `ensemble_lines()`.
-  - **Melody and bass slots:** a melody line can be added as a fixed part (`_Fixed`, the way keep-as-is
-    and locks work).
+- Milestone 6 (projects, full export, `.exe`, full test-set pass, Ableton check):
+  - **Projects (.osk):** save `Settings` fully. That means melody/bass notes (embed the files), the
+    per-section tuples, instrument/part patterns, `melody_instrument`, `melody_double`,
+    `independent_bass` and `restrike_bars`. Also save each alternative's `cells`, `meta` (labels, voices,
+    sources, figures, extras, info, previous) and locks. Reopening must restore the saved notes exactly:
+    re-render with `generator.rerender()` or store the part notes too.
+  - **Full-score type-1 file and the combined divisi file:** `Orchestration.parts` already hold the rendered
+    notes (patterns, figures); use `cc1_for(line_id)` per track.
+  - **.exe:** bundle `src/orchsketch/data/` (PyInstaller `--add-data`).
+  - **Test time:** the run is about 10 min on Windows. If Milestone 6 adds more, consider a `slow` marker
+    for the biggest sweeps (`test_defaults_give_exactly_the_v04_notes`,
+    `test_melody_and_bass_in_every_preset_and_approach`) and run them in `release.bat` only.
 - **Data model:**
   - Each `Orchestration` has `cells` (pitch per line per chord) plus `meta`: "labels" (voice label per
     line per chord, used for the doubling links), "voices" (abstract voicing), "sources" (approach per
-    chord), "origin" (the unswapped original), "fixed", "model", "free", "settings" and "variation".
+    chord), "origin" (the unswapped original), "fixed", "model", "free", "settings", "variation", and since
+    Milestone 5 "figures" (rhythm of melody/bass-file lines per chord, relative to the cell pitch),
+    "extras" (bass_pin, mel_lo, l5_optional for re-solving a chord), "info" (melody/bass text) and
+    "previous" (earlier variations' cells, for Regenerate).
+  - Rendering: `_finish` → `_render` (patterns, figures, per-section velocity, re-strike, safety net) →
+    `build_parts(notes=...)` → full check. Render-only settings (`RENDER_ONLY`) change via `rerender()`.
   - Edits never change an orchestration in place; undo relies on that.
 - **Test conventions:** `tests/test_generator.py` sweeps A (snapshot), B and C over every section
   combination, every preset and Forces × Density samples, so any new approach or option should pass the
@@ -170,6 +273,8 @@
   player goes through `player_factory`, so UI tests never open a popup or audio. Keep it that way. Tests
   set `run_async = False`, and `wait_for_generation()` waits for a background Generate.
 - `tests/test_generator.py` sweeps every section combination; any new approach should pass the same sweep.
+  `tests/test_motion.py` holds the Milestone 5 sweeps; if the defaults are ever changed on purpose, rerun
+  `tests/make_v04_snapshot.py` (and `make_a_snapshot.py` for A) and say so in the changelog.
 - Windows workflow: edit in the cloud workspace, pack a uniquely named `.tgz` into `_sync\`, unpack it in the linked folder, and
   copy over the files (deletes aren't allowed there, so `tar` can't overwrite; `cp` can). Ask Sam to run `scripts\run_tests.bat`
   and read `test_results.txt`. The linked folder must be `Documents\OrchSketch`. The Milestone 4 chat was linked to

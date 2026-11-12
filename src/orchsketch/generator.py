@@ -32,12 +32,13 @@ import itertools
 import random
 from dataclasses import dataclass, field, replace
 
+from . import patterns as pat
 from .analysis.chords import QUALITIES, ChordLabel
-from .checker import ChordSpan, Part, Report, check, required_tones
+from .checker import ChordSpan, Issue, Part, Report, check, required_tones
 from .instruments import SECTIONS, Instrument, instruments as builtin_instruments
-from .midi_io import Note, position_text
-from .rules import SAFE, Rules, rules as builtin_rules
-from .theory import Key
+from .midi_io import TOLERANCE, Note, position_text
+from .rules import MODERATE, SAFE, WARNING, Rules, rules as builtin_rules
+from .theory import Key, note_name
 
 VOICES = ("B", "L5", "h1", "h2", "h3", "h4")
 UPPER = ("h1", "h2", "h3", "h4")
@@ -51,7 +52,9 @@ VELOCITY = 80  # mf, the default
 CC1 = 80
 FORCES = ("solo", "section", "divisi")
 DENSITY_STEPS = (1, 2, 3, 4, 5)
+CHARACTERS = (SAFE, MODERATE)
 TOP_SMOOTH, TOP_INPUT = "smooth", "input"
+DOUBLINGS = ("auto", "off", "up", "down")  # melody octave doubling
 
 # Search sizes. KEEP valid candidates per chord go into the path search; more if no path is found.
 KEEP = (40, 200)
@@ -60,7 +63,8 @@ MAX_CANDIDATES_CHECKED = 2500
 BASS_WINDOW = (40, 51)  # the bass voice: E2..Eb3, one octave so octave doublings stay fixed
 HEROIC = (53, 65)  # horn F3..F4
 PARALLEL_COST = 8.0  # parallel 5ths/8ves between independent lines (a checker warning): avoided when possible
-SAME_AS_BEFORE_COST = 2.0  # "Regenerate" pushes away from the previous result
+SAME_AS_BEFORE_COST = 2.0  # "Regenerate" pushes away from the previous results
+REGEN_MEMORY = 8  # Regenerate avoids this many earlier variations (not just the last one)
 KEEP_GROUP = "keep"
 
 
@@ -224,24 +228,41 @@ C = Approach(
 APPROACH = {"A": A, "B": B, "C": C}
 
 
+def _pairs(d) -> tuple[tuple[str, object], ...]:
+    """A dict (or pairs) as sorted pairs, so settings stay hashable and compare equal."""
+    if not d:
+        return ()
+    items = d.items() if isinstance(d, dict) else d
+    return tuple(sorted((str(k), v) for k, v in items))
+
+
 @dataclass(frozen=True)
 class Ensemble:
     """Which instruments play, plus the Forces and Density sliders.
 
     `Ensemble(sections)` turns whole sections on (Milestone 3 toggles); presets pass `instruments`.
+    `forces` / `density` are the master values; `section_forces` / `section_density` override them per section
+    (SPEC §6 per-section sliders). With no overrides every section uses the master value.
     """
     sections: frozenset[str] = frozenset(SECTIONS)
     instruments: frozenset[str] | None = None
     forces: str = "section"
     density: int = 5
+    section_forces: tuple = ()  # (section, forces) pairs
+    section_density: tuple = ()  # (section, density) pairs
 
     def __post_init__(self):
         bad = set(self.sections) - set(SECTIONS)
         if bad:
             raise ValueError(f"unknown section(s) {sorted(bad)}")
-        if self.forces not in FORCES:
+        object.__setattr__(self, "section_forces", _pairs(self.section_forces))
+        object.__setattr__(self, "section_density", _pairs(self.section_density))
+        for sec, _ in self.section_forces + self.section_density:
+            if sec not in SECTIONS:
+                raise ValueError(f"unknown section {sec!r}")
+        if self.forces not in FORCES or any(f not in FORCES for _, f in self.section_forces):
             raise ValueError(f"forces must be one of {FORCES}")
-        if self.density not in DENSITY_STEPS:
+        if self.density not in DENSITY_STEPS or any(d not in DENSITY_STEPS for _, d in self.section_density):
             raise ValueError("density must be 1-5")
         if self.instruments is not None:
             object.__setattr__(self, "instruments", frozenset(self.instruments))
@@ -249,6 +270,12 @@ class Ensemble:
                 raise ValueError("at least one instrument must play")
         elif not self.sections:
             raise ValueError("at least one section must play")
+
+    def forces_for(self, section: str) -> str:
+        return dict(self.section_forces).get(section, self.forces)
+
+    def density_for(self, section: str) -> int:
+        return dict(self.section_density).get(section, self.density)
 
     def active(self, insts: dict[str, Instrument]) -> frozenset[str]:
         if self.instruments is not None:
@@ -261,16 +288,72 @@ class Ensemble:
 
 @dataclass(frozen=True)
 class Settings:
-    """Everything besides chords, key and seed that shapes a generation."""
+    """Everything besides chords, key and seed that shapes a generation.
+
+    Per-section values (`section_*`) override the master value for that section. Defaults give exactly the
+    Milestone 4 result: safe mode, Sustain everywhere, no melody or bass file.
+    """
     ensemble: Ensemble = Ensemble()
     top_voice: str = TOP_SMOOTH  # "smooth" or "input"
     tops: tuple[int | None, ...] = ()  # the input clip's top note per chord (for "input")
     keep: tuple[tuple[int, ...], ...] | None = None  # the input voicing per chord, kept in the strings
     dynamics: str = "mf"
+    section_dynamics: tuple = ()  # (section, dynamics) pairs
+    character: str = SAFE  # Character slider: "safe" or "moderate"
+    section_character: tuple = ()  # (section, character) pairs
+    pattern: str = pat.SUSTAIN  # master rhythm pattern
+    section_patterns: tuple = ()  # (section, pattern) pairs
+    instrument_patterns: tuple = ()  # (instrument id, pattern) pairs (presets, e.g. low brass)
+    part_patterns: tuple = ()  # (line id, pattern) pairs: per-part overrides
+    restrike_bars: bool = False  # Sustain re-strikes every bar instead of holding ties
+    melody: tuple[Note, ...] | None = None  # the melody file's notes (SPEC §5 step 3)
+    bass: tuple[Note, ...] | None = None  # the bass file's notes (SPEC §5 step 2)
+    melody_instrument: str | None = None  # None: chosen by register and approach
+    melody_double: str = "auto"  # auto / off / up / down
+    independent_bass: bool = False  # moderate only: a bass line moving by step toward the next chord
+
+    def __post_init__(self):
+        for f in ("section_dynamics", "section_character", "section_patterns", "instrument_patterns",
+                  "part_patterns"):
+            object.__setattr__(self, f, _pairs(getattr(self, f)))
+        if self.dynamics not in DYNAMICS or any(d not in DYNAMICS for _, d in self.section_dynamics):
+            raise ValueError("dynamics must be one of " + " ".join(DYNAMICS))
+        if self.character not in CHARACTERS or any(c not in CHARACTERS for _, c in self.section_character):
+            raise ValueError("character must be safe or moderate")
+        if self.pattern not in pat.PATTERNS or any(p not in pat.PATTERNS for _, p in self.section_patterns
+                                                   + self.instrument_patterns + self.part_patterns):
+            raise ValueError("unknown rhythm pattern")
+        if self.melody_double not in DOUBLINGS:
+            raise ValueError(f"melody doubling must be one of {DOUBLINGS}")
+        for f in ("melody", "bass"):
+            v = getattr(self, f)
+            if v is not None:
+                object.__setattr__(self, f, tuple(sorted(v, key=lambda n: n.start)) or None)
 
     @property
     def velocity(self) -> int:
         return DYNAMICS[self.dynamics]
+
+    def dynamics_for(self, section: str) -> str:
+        return dict(self.section_dynamics).get(section, self.dynamics)
+
+    def velocity_for(self, section: str) -> int:
+        return DYNAMICS[self.dynamics_for(section)]
+
+    def character_for(self, section: str) -> str:
+        return dict(self.section_character).get(section, self.character)
+
+    def pattern_for(self, line_id: str, section: str, instrument: str | None = None) -> str:
+        """Part override, else instrument (presets), else section, else the master pattern."""
+        if line_id in dict(self.part_patterns):
+            return dict(self.part_patterns)[line_id]
+        if instrument is not None and instrument in dict(self.instrument_patterns):
+            return dict(self.instrument_patterns)[instrument]
+        return dict(self.section_patterns).get(section, self.pattern)
+
+    def mode(self, sections=SECTIONS) -> str:
+        """The checker mode: moderate when any of these sections is moderate."""
+        return MODERATE if any(self.character_for(s) == MODERATE for s in sections) else SAFE
 
 
 @dataclass(frozen=True)
@@ -318,6 +401,17 @@ class Orchestration:
     def part(self, line_id: str) -> Part:
         return next(p for p in self.parts if p.id == line_id)
 
+    def section_of(self, line_id: str) -> str:
+        return builtin_instruments()[self.line(line_id).instrument].section
+
+    def cc1_for(self, line_id: str) -> int:
+        """The part's constant CC1 value (its section's Dynamics; SPEC §6)."""
+        return self.settings.velocity_for(self.section_of(line_id))
+
+    @property
+    def figures(self) -> dict:
+        return self.meta.get("figures") or {}
+
     def line(self, line_id: str) -> Line:
         return next(ln for ln in self.lines if ln.id == line_id)
 
@@ -338,7 +432,8 @@ class Orchestration:
 def ensemble_lines(ensemble: Ensemble, insts: dict[str, Instrument], keep: bool = False) -> list[Line]:
     """Every line the ensemble can use (any approach), score order. Keep-as-is swaps the strings for slots."""
     active = ensemble.active(insts)
-    out = [ln for ln in LINES if ln.instrument in active and ensemble.forces in ln.forces]
+    out = [ln for ln in LINES if ln.instrument in active
+           and ensemble.forces_for(insts[ln.instrument].section) in ln.forces]
     if keep:
         out = [ln for ln in out if insts[ln.instrument].section != "strings"]
         out += list(KEEP_LINES)
@@ -364,16 +459,27 @@ def approach_lines(approach: Approach, ensemble: Ensemble, insts: dict[str, Inst
             continue
         lines.append(replace(ln, voices=spec[0], octaves=spec[1]))
     lines = _spread_upper(lines, insts)
-    if ensemble.density < 5:
-        lines = _thin(lines, approach, insts, {1: 1, 2: 2, 3: 3, 4: 5}[ensemble.density])
+    dens = {insts[ln.instrument].section: ensemble.density_for(insts[ln.instrument].section) for ln in lines}
+    if dens and min(dens.values()) < 5:
+        lines = _thin(lines, approach, insts, {sec: DENSITY_K[d] for sec, d in dens.items()})
     return _anchor_octaves(lines, insts)
 
 
-def _thin(lines: list[Line], approach: Approach, insts, k: int) -> list[Line]:
+DENSITY_K = {1: 1, 2: 2, 3: 3, 4: 5, 5: 10 ** 6}  # lines kept per voice at each Density step
+
+
+def _thin(lines: list[Line], approach: Approach, insts, k) -> list[Line]:
     """Density: keep the k most important lines per voice (approach lead order). The choir plays as a
-    whole, and each section keeps its voices contiguous (no gaps over an octave inside a section)."""
+    whole, and each section keeps its voices contiguous (no gaps over an octave inside a section).
+
+    `k` is one number, or a number per section (per-section Density sliders): then the lines are first kept
+    as for the highest k, and a section with a lower k keeps only its own k most important lines per voice.
+    With the same k everywhere this is exactly the single-number rule."""
     lead = {lid: i for i, lid in enumerate(approach.lead)}
     score = {ln.id: i for i, ln in enumerate(LINES)}
+    sec_of = {ln.id: insts[ln.instrument].section for ln in lines}
+    ks = k if isinstance(k, dict) else {sec: k for sec in sec_of.values()}
+    kmax = max(ks.values())
 
     def importance(ln):
         return lead.get(ln.id, 100 + score.get(ln.id, 0))
@@ -381,7 +487,13 @@ def _thin(lines: list[Line], approach: Approach, insts, k: int) -> list[Line]:
     keepers: set[str] = set()
     for v in VOICES:
         carriers = sorted((ln for ln in lines if ln.voices[0] == v), key=importance)
-        keepers.update(ln.id for ln in carriers[:k])
+        kept = carriers[:kmax]
+        rank: dict[str, int] = {}
+        for ln in kept:
+            sec = sec_of[ln.id]
+            rank[sec] = rank.get(sec, 0) + 1
+            if rank[sec] <= ks[sec]:
+                keepers.add(ln.id)
     if any(ln.id in keepers for ln in lines if ln.id in CHOIR_IDS):
         keepers.update(ln.id for ln in lines if ln.id in CHOIR_IDS)
     for sec in SECTIONS:
@@ -445,10 +557,13 @@ def _spread_upper(lines: list[Line], insts: dict[str, Instrument]) -> list[Line]
 # ---------------------------------------------------------------- setup
 class _Setup:
     def __init__(self, lines: list[Line], insts: dict[str, Instrument], approach: Approach,
-                 need_bass: bool = True):
+                 need_bass: bool = True, settings: Settings | None = None):
         self.inst = insts
         self.approach = approach
         self.lines = lines
+        settings = settings or Settings()
+        # moderate mode (per section): lines that may reach playable range
+        self.moderate = {ln.id for ln in lines if settings.character_for(insts[ln.instrument].section) == MODERATE}
         self.choir = any(ln.id == CHOIR_BASS for ln in self.lines)
         rank = {s: i for i, s in enumerate(SECTION_PRIORITY)}
         order = {ln.id: i for i, ln in enumerate(self.lines)}
@@ -466,11 +581,20 @@ class _Setup:
         self.switch_ids = [(ln.id, ln.voices[0]) for ln in self.lines
                            if ln.voices[0] in UPPER and len(ln.octaves) > 1]
         self.choir_lines = {ln.voices[0]: ln.id for ln in self.lines if ln.id in CHOIR_IDS}
+        self.by_id = {ln.id: ln for ln in self.lines}
         if need_bass and "B" not in self.primary:
             raise GenerationError("Nothing can play the bass line with these instruments.")
+        # moderate: upper voices whose every line is in a moderate section may take a colour tone
+        self.colour_voices = {v for v in UPPER if any(ln.voices[0] == v for ln in self.lines)
+                              and all(ln.id in self.moderate for ln in self.lines if ln.voices[0] == v)}
 
     def comfortable(self, line: Line, pitch: int) -> bool:
         return self.inst[line.instrument].is_comfortable(pitch)
+
+    def in_range(self, line: Line, pitch: int) -> bool:
+        """Comfortable range, or playable range for a line in a moderate section."""
+        inst = self.inst[line.instrument]
+        return inst.is_comfortable(pitch) or (line.id in self.moderate and inst.is_playable(pitch))
 
     def line_pitch(self, line: Line, voices: dict[str, int]) -> int | None:
         for v in line.voices:
@@ -479,6 +603,11 @@ class _Setup:
                     p = voices[v] + off
                     if self.comfortable(line, p):
                         return p
+                if line.id in self.moderate:  # moderate: playable range, flagged yellow
+                    for off in line.octaves:
+                        p = voices[v] + off
+                        if self.inst[line.instrument].is_playable(p):
+                            return p
                 return None  # its preferred sounding voice doesn't fit: rest
         return None
 
@@ -542,81 +671,146 @@ def _input_top(setup: _Setup, label: ChordLabel, top: int | None) -> tuple[int |
     return top % 12, target
 
 
+COLOUR_COST = 1.3  # moderate: a colour tone costs a little, so roughly 40-45% of chords get one
+NO_L5_COST = 0.6  # with a moving bass line the open 5th may rest
+
+
+def colour_pcs(label: ChordLabel, key: Key) -> set[int]:
+    """Moderate mode (SPEC §5b): diatonic 9th, sus 4th colour and added 6th for this chord, if any.
+    No colour on diminished, augmented or half-diminished chords; no 4th over a major 3rd."""
+    if label.quality in ("dim", "aug", "dim7", "m7b5"):
+        return set()
+    ivs = QUALITIES[label.quality][0]
+    pcs, scale = label.pcs(), key.scale_pcs()
+    out = set()
+    for iv in (2, 5, 9):
+        pc = (label.root + iv) % 12
+        if pc in pcs or pc not in scale:
+            continue
+        if iv == 5 and 4 in ivs:
+            continue
+        out.add(pc)
+    return out
+
+
 def _candidates(setup: _Setup, span: ChordSpan, key: Key, seed, index: int, *, top: int | None = None,
-                fixed_pcs: frozenset[int] = frozenset(), avoid: dict[str, int | None] | None = None
+                fixed_pcs: frozenset[int] = frozenset(), avoid: dict[str, int | None] | None = None,
+                bass_pin: int | None = None, mel_lo: int | None = None, l5_optional: bool = False
                 ) -> list[_Cand]:
+    """Every voicing of the chord for the model lines, cheapest first.
+
+    bass_pin: the bass voice's pitch is given (a bass file or independent bass line plays it).
+    mel_lo: the melody's lowest note in this chord; upper voices above it cost a little (voiced around it).
+    l5_optional: the open 5th may also rest (used with a moving bass line).
+    Moderate sections add voicings with one colour tone (colour_pcs) in an upper voice.
+    """
     label = span.label
     chord_pcs = label.pcs()
     sens = _sensitive_pcs(label, key)
     need = set(required_tones(label)) - set(fixed_pcs)
     ivs = QUALITIES[label.quality][0]
-    root_pos = label.bass == label.root
+    bass_pc = label.bass if bass_pin is None else bass_pin % 12
+    root_pos = bass_pc == label.root
     want_l5 = root_pos and 7 in ivs and any("L5" in ln.voices for ln in setup.lines)
     rng = random.Random(f"{seed}:{index}:{label.root}:{label.quality}:{label.bass}")
     lo, hi = setup.approach.upper_window
     tones = [p for p in range(lo, hi + 1) if p % 12 in chord_pcs]
     n_up = len(setup.upper)
     top_pc, top_target = _input_top(setup, label, top)
+    colours = colour_pcs(label, key) if setup.colour_voices and n_up else set()
+    ctones = [p for p in range(lo, hi + 1) if p % 12 in colours]
     choir_ranges = {}
     for v, lid in setup.choir_lines.items():
         if v != "B" and v in setup.upper:
-            choir_ranges[v] = setup.inst[CHOIR_INSTRUMENTS[lid]].comfortable
+            inst = setup.inst[CHOIR_INSTRUMENTS[lid]]
+            choir_ranges[v] = inst.playable if lid in setup.moderate else inst.comfortable
     out: list[_Cand] = []
     seen = set()
-    for bass in range(BASS_WINDOW[0], BASS_WINDOW[1] + 1):
-        if bass % 12 != label.bass:
-            continue
+
+    def consider(bass: int, ups: tuple[int, ...], colour: int | None):
+        # adjacent upper voices: at most an octave apart; unisons allowed (needed e.g. for a choir
+        # on power chords) but never three voices on one note
+        if any(b - a > 12 for a, b in zip(ups, ups[1:])):
+            return
+        if any(a == c for a, c in zip(ups, ups[2:])):
+            return
+        if ups and ups[0] <= bass:
+            return
+        if top_pc is not None and ups and ups[-1] % 12 != top_pc:
+            return
+        voices = {"B": bass}
+        for v, p in zip(setup.upper, ups):
+            voices[v] = p
+        if colour is not None:
+            cv = setup.upper[ups.index(colour)]
+            if cv not in setup.colour_voices:
+                return
+        with_l5 = want_l5 and (not ups or bass + 7 < ups[0])
+        for l5 in ((True, False) if with_l5 and l5_optional else (with_l5,)):
+            vs = dict(voices, L5=bass + 7) if l5 else voices
+            _consider_voices(vs, ups, colour, NO_L5_COST if with_l5 and not l5 else 0.0)
+
+    def _consider_voices(voices, ups, colour, extra):
+        # leading tone / chord 7th in at most one line family (bass + L5 count as one)
+        up_pcs = [p % 12 for p in ups]
+        low_pcs = {bass_pc} | ({(voices["B"] + 7) % 12} if "L5" in voices else set())
+        if any(up_pcs.count(pc) + (pc in low_pcs) > 1 for pc in sens):
+            return
+        if not need <= set(up_pcs) | low_pcs:
+            return
+        if colour is not None:  # a colour tone never sits a semitone from another sounding voice
+            if any(abs(colour - q) == 1 for q in voices.values()):
+                return
+        if any(not (r[0] <= voices[v] <= r[1]) for v, r in choir_ranges.items()):
+            return
+        pitches: dict[str, int | None] = {ln.id: (None if ln.id == CHOIR_BASS else setup.line_pitch(ln, voices))
+                                          for ln in setup.lines}
+        # every voice's primary line must sound it (the choir bass is placed below)
+        if any(pitches.get(setup.primary[v]) is None for v in voices
+               if v in setup.primary and setup.primary[v] != CHOIR_BASS):
+            return
+        bass_opts = [None]
+        if setup.choir:
+            tenor = voices.get(next((v for v, lid in setup.choir_lines.items() if lid == "ch-t"), "-"), 127)
+            r = setup.inst["choir_bass"].playable if CHOIR_BASS in setup.moderate else setup.inst["choir_bass"].comfortable
+            bass_opts = [p for p in range(r[0], r[1] + 1) if p % 12 == bass_pc and p <= tenor]
+            if not bass_opts:
+                return
+        for cb in bass_opts:
+            if cb is not None:
+                pitches = dict(pitches, **{CHOIR_BASS: cb})
+            key_ = tuple(sorted(pitches.items()))
+            if key_ in seen:
+                continue
+            seen.add(key_)
+            cost = _vertical_cost(setup, label, voices, pitches, rng, top_target)
+            if avoid is not None:  # Regenerate: away from earlier results (one dict, or a list of them)
+                for av in (avoid if isinstance(avoid, list) else [avoid]):
+                    if all(pitches.get(k) == p for k, p in av.items()):
+                        cost += SAME_AS_BEFORE_COST
+            if colour is not None:
+                cost += COLOUR_COST
+            if mel_lo is not None and ups:
+                cost += 0.3 * max(0, max(ups) - mel_lo)
+            if setup.moderate:
+                cost += 0.5 * sum(1 for lid, p in pitches.items() if p is not None
+                                  and not setup.inst[_line_inst(setup, lid)].is_comfortable(p))
+            out.append(_Cand(tuple(sorted(voices.items())), tuple(pitches.items()), cost + extra))
+
+    basses = [bass_pin] if bass_pin is not None else [b for b in range(BASS_WINDOW[0], BASS_WINDOW[1] + 1)
+                                                      if b % 12 == label.bass]
+    for bass in basses:
         for ups in itertools.combinations_with_replacement(tones, n_up):
-            # adjacent upper voices: at most an octave apart; unisons allowed (needed e.g. for a choir
-            # on power chords) but never three voices on one note
-            if any(b - a > 12 for a, b in zip(ups, ups[1:])):
-                continue
-            if any(a == c for a, c in zip(ups, ups[2:])):
-                continue
-            if ups and ups[0] <= bass:
-                continue
-            if top_pc is not None and ups and ups[-1] % 12 != top_pc:
-                continue
-            voices = {"B": bass}
-            for v, p in zip(setup.upper, ups):
-                voices[v] = p
-            if want_l5 and (not ups or bass + 7 < ups[0]):
-                voices["L5"] = bass + 7
-            # leading tone / chord 7th in at most one line family (bass + L5 count as one)
-            up_pcs = [p % 12 for p in ups]
-            low_pcs = {label.bass} | ({(bass + 7) % 12} if "L5" in voices else set())
-            if any(up_pcs.count(pc) + (pc in low_pcs) > 1 for pc in sens):
-                continue
-            if not need <= set(up_pcs) | low_pcs:
-                continue
-            if any(not (r[0] <= voices[v] <= r[1]) for v, r in choir_ranges.items()):
-                continue
-            pitches: dict[str, int | None] = {ln.id: (None if ln.id == CHOIR_BASS else setup.line_pitch(ln, voices))
-                                              for ln in setup.lines}
-            # every voice's primary line must sound it (the choir bass is placed below)
-            if any(pitches.get(setup.primary[v]) is None for v in voices
-                   if v in setup.primary and setup.primary[v] != CHOIR_BASS):
-                continue
-            bass_opts = [None]
-            if setup.choir:
-                tenor = voices.get(next((v for v, lid in setup.choir_lines.items() if lid == "ch-t"), "-"), 127)
-                r = setup.inst["choir_bass"].comfortable
-                bass_opts = [p for p in range(r[0], r[1] + 1) if p % 12 == label.bass and p <= tenor]
-                if not bass_opts:
-                    continue
-            for cb in bass_opts:
-                if cb is not None:
-                    pitches = dict(pitches, **{CHOIR_BASS: cb})
-                key_ = tuple(sorted(pitches.items()))
-                if key_ in seen:
-                    continue
-                seen.add(key_)
-                cost = _vertical_cost(setup, label, voices, pitches, rng, top_target)
-                if avoid is not None and all(pitches.get(k) == p for k, p in avoid.items()):
-                    cost += SAME_AS_BEFORE_COST
-                out.append(_Cand(tuple(sorted(voices.items())), tuple(pitches.items()), cost))
+            consider(bass, ups, None)
+        for c in ctones:  # moderate: one colour tone in one upper voice
+            for rest in itertools.combinations_with_replacement(tones, n_up - 1):
+                consider(bass, tuple(sorted(rest + (c,))), c)
     out.sort(key=lambda c: c.cost)
     return out
+
+
+def _line_inst(setup: _Setup, line_id: str) -> str:
+    return setup.by_id[line_id].instrument
 
 
 # ---------------------------------------------------------------- parts
@@ -628,7 +822,7 @@ def _ties(spans: list[ChordSpan]) -> list[bool]:
 
 def build_parts(lines: list[Line], spans: list[ChordSpan], cells: dict[str, list[int | None]],
                 labels: dict[str, list[str | None]], velocity: int, insts: dict[str, Instrument],
-                tie: list[bool] | None = None) -> list[Part]:
+                tie: list[bool] | None = None, notes: dict[str, list[Note]] | None = None) -> list[Part]:
     """Checker parts from per-chord pitches and voice labels.
 
     A line doubles another when, at every chord where it sounds, the other sounds the same voice label on
@@ -658,16 +852,20 @@ def build_parts(lines: list[Line], spans: list[ChordSpan], cells: dict[str, list
                 if f != ln.id:
                     local[ln.id][i] = f
     parts = []
+    given = notes or {}
     for ln in lines:
         cl, lb = cells[ln.id], labels[ln.id]
-        notes: list[Note] = []
-        for i, (p, s) in enumerate(zip(cl, spans)):
-            if p is None:
-                continue
-            if i > 0 and tie[i - 1] and notes and notes[-1].pitch == p and notes[-1].end == s.start:
-                notes[-1] = Note(p, notes[-1].start, s.end, velocity)
-            else:
-                notes.append(Note(p, s.start, s.end, velocity))
+        if ln.id in given:
+            notes = list(given[ln.id])
+        else:
+            notes: list[Note] = []
+            for i, (p, s) in enumerate(zip(cl, spans)):
+                if p is None:
+                    continue
+                if i > 0 and tie[i - 1] and notes and notes[-1].pitch == p and notes[-1].end == s.start:
+                    notes[-1] = Note(p, notes[-1].start, s.end, velocity)
+                else:
+                    notes.append(Note(p, s.start, s.end, velocity))
         sounding = [i for i, p in enumerate(cl) if p is not None]
         doubles = None
         for cand in prio[:pos[ln.id]]:
@@ -712,12 +910,36 @@ def _parallel(a1, a2, b1, b2) -> bool:
     return iv1 == iv2 and iv1 in (0, 7)
 
 
+# A figure: one part's notes inside one chord, relative to the part's cell pitch at that chord:
+# (start tick, end tick, semitones from the cell pitch, tied to the previous chord's last note).
+Figure = tuple[tuple[int, int, int, bool], ...]
+
+
+def figure_notes(cell: int | None, fig: Figure | None, span: ChordSpan, velocity: int) -> list[Note]:
+    """The notes of one part at one chord: its figure (melody, bass file) or one note for the chord."""
+    if cell is None:
+        return []
+    if fig is None:
+        return [Note(cell, span.start, span.end, velocity)]
+    return [Note(cell + d, s, e, velocity) for s, e, d, _ in fig]
+
+
+def _fig_end(cell: int, fig: Figure | None) -> int:
+    """The part's top note at the chord's last attack (what the checker's melodic checks follow)."""
+    if not fig:
+        return cell
+    last = max(f[0] for f in fig)
+    return cell + max(f[2] for f in fig if f[0] == last)
+
+
 @dataclass
 class _Fixed:
-    """Fixed parts during a solve (locked parts, kept input voicing, a part regenerated on its own)."""
+    """Fixed parts during a solve (locked parts, kept input voicing, a part regenerated on its own, the
+    melody and the bass file lines). `figures` gives the rhythm of lines that don't simply sustain."""
     lines: list[Line]
     cells: dict[str, list[int | None]]
     labels: dict[str, list[str | None]]
+    figures: dict[str, list[Figure | None]] = field(default_factory=dict)
 
     @property
     def ids(self) -> set[str]:
@@ -726,15 +948,32 @@ class _Fixed:
     def at(self, i: int) -> dict[str, int]:
         return {ln.id: self.cells[ln.id][i] for ln in self.lines if self.cells[ln.id][i] is not None}
 
+    def end_at(self, i: int) -> dict[str, int]:
+        """Pitch at the chord's last attack (the start pitch unless the line has a figure)."""
+        return {lid: _fig_end(p, self.figures[lid][i] if lid in self.figures else None)
+                for lid, p in self.at(i).items()}
+
     def choir_at(self, i: int) -> dict[str, int]:
         return {lid: p for lid, p in self.at(i).items() if lid in CHOIR_IDS}
+
+    def choir_end_at(self, i: int) -> dict[str, int]:
+        return {lid: p for lid, p in self.end_at(i).items() if lid in CHOIR_IDS}
+
+    def notes(self, line_id: str, i: int, span: ChordSpan, velocity: int) -> list[Note]:
+        fig = self.figures[line_id][i] if line_id in self.figures else None
+        return figure_notes(self.cells[line_id][i], fig, span, velocity)
 
 
 class _Solver:
     def __init__(self, setup: _Setup, spans, key, seed, rules, insts, settings: Settings, fixed: _Fixed | None,
-                 variation: int = 0, avoid: dict[str, list[int | None]] | None = None):
+                 variation: int = 0, avoid: dict[str, list[int | None]] | None = None,
+                 extras: dict | None = None):
         self.setup, self.spans, self.key, self.rules, self.insts = setup, spans, key, rules, insts
         self.settings = settings
+        self.mode = settings.mode()
+        # per chord: "bass_pin" (bass voice pitch), "mel_lo" (melody's lowest note); "l5_optional"
+        self.extras = extras or {}
+        self.on_empty = None  # callback(i) -> True if it changed the fixed parts so chord i can be retried
         self.fixed = fixed or _Fixed([], {}, {})
         self.seed_key = seed if variation == 0 else f"{seed}.{variation}"
         self.avoid = avoid
@@ -742,6 +981,8 @@ class _Solver:
         self.follow = settings.top_voice == TOP_INPUT
         self.velocity = VELOCITY  # candidates are checked at mf; velocity doesn't change any rule
         self.fixed_motion = bool(self.fixed.lines)
+        self.melody_ids = [ln.id for ln in self.fixed.lines if ln.role == "melody"]
+        self.model_ids = [ln.id for ln in setup.lines]
         rank = {sec: k for k, sec in enumerate(SECTION_PRIORITY)}
         self.all_lines = list(setup.lines) + self.fixed.lines
         order = {ln.id: k for k, ln in enumerate(self.all_lines)}
@@ -756,19 +997,22 @@ class _Solver:
         fixed_now = self.fixed.at(i)
         avoid = None
         if self.avoid is not None:
-            avoid = {lid: col[i] for lid, col in self.avoid.items() if lid in {ln.id for ln in self.setup.lines}}
+            ids = {ln.id for ln in self.setup.lines}
+            avoid = [{lid: col[i] for lid, col in av.items() if lid in ids}
+                     for av in (self.avoid if isinstance(self.avoid, list) else [self.avoid])]
+        ex = {k: (v[i] if isinstance(v, list) else v) for k, v in self.extras.items()}
         cands = _candidates(self.setup, span, self.key, self.seed_key, i, top=top,
-                            fixed_pcs=frozenset(p % 12 for p in fixed_now.values()), avoid=avoid)
+                            fixed_pcs=frozenset(p % 12 for p in fixed_now.values()), avoid=avoid, **ex)
         if top is not None and not cands:  # the input's top note can't be the top voice here: smooth
             cands = _candidates(self.setup, span, self.key, self.seed_key, i,
-                                fixed_pcs=frozenset(p % 12 for p in fixed_now.values()), avoid=avoid)
+                                fixed_pcs=frozenset(p % 12 for p in fixed_now.values()), avoid=avoid, **ex)
         owned = self.fixed.ids
         valid = []
         for c in cands[:MAX_CANDIDATES_CHECKED]:
             if exclude_keys and c.key in exclude_keys:
                 continue
             parts = self.chord_parts(c, i)
-            rep = check(parts, [span], self.key, SAFE, rules=self.rules, instruments=self.insts)
+            rep = check(parts, [span], self.key, self.mode, rules=self.rules, instruments=self.insts)
             if not _must_fix(rep, self.rules, owned):
                 valid.append(c)
                 if len(valid) >= KEEP[-1]:
@@ -794,14 +1038,16 @@ class _Solver:
                 p, lab = sound[ln.id]
                 first.setdefault((lab, p % 12), ln.id)
         parts = []
+        fixed_ids = fixed.ids
         for ln in self.all_lines:
             if ln.id not in sound:
                 continue
             p, lab = sound[ln.id]
             d = first[(lab, p % 12)] if lab is not None else ln.id
             group = KEEP_GROUP if ln.id in KEEP_LINE_BY_ID else ("low" if lab in ("B", "L5") else None)
-            parts.append(Part(ln.id, ln.instrument, (Note(p, span.start, span.end, self.velocity),), ln.role,
-                              None if d == ln.id else d, group, ln.label))
+            notes = (tuple(fixed.notes(ln.id, i, span, self.velocity)) if ln.id in fixed_ids
+                     else (Note(p, span.start, span.end, self.velocity),))
+            parts.append(Part(ln.id, ln.instrument, notes, ln.role, None if d == ln.id else d, group, ln.label))
         return parts
 
     # --- between chords
@@ -814,7 +1060,7 @@ class _Solver:
         # choir: leaps of at most an octave, no parallels between any two choir voices (hard rules)
         fa = fb = None
         if self.fixed_motion:
-            fa, fb = self.fixed.choir_at(i - 1), self.fixed.choir_at(i)
+            fa, fb = self.fixed.choir_end_at(i - 1), self.fixed.choir_at(i)
         if setup.choir or fa or fb:
             if fa or fb:
                 pa_, pb_ = dict(a.ch, **(fa or {})), dict(b.ch, **(fb or {}))
@@ -866,13 +1112,21 @@ class _Solver:
                     for y, n1, n2 in others + extra[k + 1:]:
                         if y != x and _parallel(m1, m2, n1, n2):
                             cost += pc
-        if self.fixed_motion:  # parallels against fixed parts (locked, kept)
-            f1, f2 = self.fixed.at(i - 1), self.fixed.at(i)
+        if self.fixed_motion:  # parallels against fixed parts (locked, kept, melody, bass file)
+            f1, f2 = self.fixed.end_at(i - 1), self.fixed.at(i)
             fm = {(f1[k], f2[k]) for k in f1 if k in f2}
             for x in list(ups) + (["B"] if "B" in av and "B" in bv else []):
                 for m1, m2 in fm:
                     if _parallel(av[x], bv[x], m1, m2):
                         cost += pc
+            if self.melody_ids:  # the melody against every real model line (octave doublings included)
+                mm = {(f1[k], f2[k]) for k in self.melody_ids if k in f1 and k in f2}
+                if mm:
+                    lm = {(pa[k], pb[k]) for k in self.model_ids if pa.get(k) is not None and pb.get(k) is not None}
+                    for m1, m2 in mm:
+                        for n1, n2 in lm:
+                            if _parallel(m1, m2, n1, n2):
+                                cost += pc
         return cost
 
     def viterbi(self, layers: list[list[_Cand]]) -> list[_Cand] | None:
@@ -907,6 +1161,8 @@ class _Solver:
         all_valid = []
         for i, span in enumerate(self.spans):
             valid = self.valid(i)
+            while not valid and self.on_empty is not None and self.on_empty(i):
+                valid = self.valid(i)
             if not valid:
                 raise GenerationError(
                     f"No voicing of {span.label.symbol(self.key)} at {position_text(span.start)} passes the "
@@ -993,18 +1249,48 @@ def _keep_labels(kc: dict[str, list[int | None]], spans: list[ChordSpan]) -> dic
 
 
 # ---------------------------------------------------------------- public
+MELODY_ATTEMPTS = 4  # melody plans tried before giving up (host with/without doubling, next host...)
+
+
 def generate(chords: list[ChordSpan], key: Key, *, seed: int = 1, ensemble: Ensemble | None = None,
-             mode: str = SAFE, rules: Rules | None = None, instruments: dict[str, Instrument] | None = None,
+             mode: str | None = None, rules: Rules | None = None, instruments: dict[str, Instrument] | None = None,
              approach: str = "A", settings: Settings | None = None,
              locked: Orchestration | None = None, locked_ids: frozenset[str] = frozenset(),
              variation: int = 0, avoid: Orchestration | None = None) -> Orchestration:
-    """Orchestrate confirmed chords in safe mode with one approach. Raises GenerationError if impossible.
+    """Orchestrate confirmed chords with one approach. Raises GenerationError if impossible.
 
+    mode: "safe" or "moderate" sets the Character of every section (otherwise settings decide).
     locked / locked_ids: keep these parts of an earlier orchestration exactly and orchestrate around them.
     variation / avoid: "Regenerate" - a different seed variation, pushed away from the earlier result.
+    With a melody, if its first plan (instrument and doubling) can't be voiced, the next plans are tried.
     """
-    if mode != SAFE:
-        raise ValueError("Generation is safe mode only until Milestone 5.")
+    kw = dict(seed=seed, ensemble=ensemble, mode=mode, rules=rules, instruments=instruments, approach=approach,
+              settings=settings, locked=locked, locked_ids=locked_ids, variation=variation, avoid=avoid)
+    has_melody = settings is not None and bool(settings.melody)
+    first = None
+    for attempt in range(MELODY_ATTEMPTS if has_melody else 1):
+        try:
+            return _generate(chords, key, melody_attempt=attempt, **kw)
+        except _NoMorePlans as exc:
+            if first is None:
+                raise GenerationError(str(exc)) from None
+            break
+        except GenerationError as exc:
+            first = first or exc
+    raise first
+
+
+class _NoMorePlans(GenerationError):
+    pass
+
+
+def _generate(chords: list[ChordSpan], key: Key, *, seed: int = 1, ensemble: Ensemble | None = None,
+              mode: str | None = None, rules: Rules | None = None, instruments: dict[str, Instrument] | None = None,
+              approach: str = "A", settings: Settings | None = None,
+              locked: Orchestration | None = None, locked_ids: frozenset[str] = frozenset(),
+              variation: int = 0, avoid: Orchestration | None = None, melody_attempt: int = 0) -> Orchestration:
+    if mode is not None and mode not in CHARACTERS:
+        raise ValueError("mode must be safe or moderate")
     if not chords:
         raise GenerationError("There are no chords to orchestrate.")
     if approach not in APPROACH:
@@ -1014,6 +1300,8 @@ def generate(chords: list[ChordSpan], key: Key, *, seed: int = 1, ensemble: Ense
     settings = settings or Settings()
     if ensemble is not None:
         settings = replace(settings, ensemble=ensemble)
+    if mode is not None:
+        settings = replace(settings, character=mode, section_character=())
     ens = settings.ensemble
     ap = APPROACH[approach]
     spans = sorted(chords, key=lambda c: c.start)
@@ -1024,12 +1312,25 @@ def generate(chords: list[ChordSpan], key: Key, *, seed: int = 1, ensemble: Ense
     all_lines = ensemble_lines(ens, insts, keep)
     if not all_lines:
         raise GenerationError("No instruments are active.")
-    locked_ids = frozenset(lid for lid in locked_ids if locked is not None and lid in locked.cells
-                           and any(ln.id == lid for ln in all_lines))
-    # fixed parts: the kept voicing, then locked parts
     fixed_lines: list[Line] = []
     fcells: dict[str, list[int | None]] = {}
     flabels: dict[str, list[str | None]] = {}
+    ffigs: dict[str, list[Figure | None]] = {}
+    info: dict = {}
+    # the melody (SPEC §5 step 3): one instrument by register (plus an optional octave doubling)
+    drop: set[str] = set()  # model lines replaced by the melody
+    mel = None
+    if settings.melody:
+        mel = _melody_plan(ap, settings, ens, insts, spans, melody_attempt)
+        if mel is not None:
+            for ln in mel["lines"]:
+                pos = next((k for k, x in enumerate(all_lines) if x.instrument == ln.instrument), len(all_lines))
+                all_lines.insert(pos, ln)
+            drop |= mel["drop"]
+            info["melody"] = mel["text"]
+    locked_ids = frozenset(lid for lid in locked_ids if locked is not None and lid in locked.cells
+                           and any(ln.id == lid for ln in all_lines))
+    # fixed parts: the kept voicing, locked parts, then the melody
     if keep:
         kc = keep_assignment(settings.keep, insts)
         kl = _keep_labels(kc, spans)
@@ -1043,18 +1344,57 @@ def generate(chords: list[ChordSpan], key: Key, *, seed: int = 1, ensemble: Ense
             fcells[ln.id] = list(locked.cells[ln.id])
             # unique labels while solving: new lines never count as doubling a locked one
             flabels[ln.id] = [None if lab is None else f"lock:{lab}" for lab in locked.meta["labels"][ln.id]]
-    fixed = _Fixed(fixed_lines, fcells, flabels) if fixed_lines else None
-    model_lines = approach_lines(ap, ens, insts, exclude=set(fcells), keep=keep)
+            if ln.id in locked.figures:
+                ffigs[ln.id] = list(locked.figures[ln.id])
+    if mel is not None:
+        for ln in mel["lines"]:
+            if ln.id not in fcells:
+                fixed_lines.append(ln)
+                fcells[ln.id] = list(mel["cells"][ln.id])
+                flabels[ln.id] = ["mel" if p is not None else None for p in fcells[ln.id]]
+                ffigs[ln.id] = list(mel["figures"])
+    model_lines = approach_lines(ap, ens, insts, exclude=set(fcells) | drop, keep=keep)
+    extras: dict = {}
+    if mel is not None:
+        extras["mel_lo"] = list(mel["lo"])
+    # the bass line (SPEC §5 step 2): a bass file, or moderate mode's independent line, doubled in octaves
+    bass = _bass_plan(settings, model_lines, insts, spans, key)
+    on_empty = None
+    if bass is not None:
+        for ln in bass["lines"]:
+            fixed_lines.append(ln)
+            fcells[ln.id] = list(bass["cells"][ln.id])
+            flabels[ln.id] = ["B" if p is not None else None for p in fcells[ln.id]]
+            ffigs[ln.id] = list(bass["figures"][ln.id])
+        model_lines = [ln for ln in model_lines if ln.id not in fcells and ln.id not in bass["resting"]]
+        extras["bass_pin"] = list(bass["pin"])
+        extras["l5_optional"] = True
+        info["bass"] = bass["kind"]
+    fixed = _Fixed(fixed_lines, fcells, flabels, ffigs) if fixed_lines else None
+    if bass is not None and bass["kind"] == "independent":
+        flat: set[int] = set()
+
+        def _hold(i: int) -> bool:  # passing tones make chord i impossible: hold the bass there
+            if i in flat or not any(len(fixed.figures[ln.id][i] or ()) > 1 for ln in bass["lines"]):
+                return False
+            flat.add(i)
+            for ln in bass["lines"]:
+                f = fixed.figures[ln.id][i]
+                fixed.figures[ln.id][i] = ((spans[i].start, spans[i].end, 0, f[0][3]),)
+            return True
+        on_empty = _hold
     has_fixed = fixed is not None and any(fixed.at(i) for i in range(n))
     cells: dict[str, list[int | None]] = {ln.id: [None] * n for ln in all_lines}
     labels: dict[str, list[str | None]] = {ln.id: [None] * n for ln in all_lines}
     voicing: list[dict] = [{} for _ in range(n)]
     if model_lines:
-        setup = _Setup(model_lines, insts, ap, need_bass=not has_fixed)
+        setup = _Setup(model_lines, insts, ap, need_bass=not has_fixed, settings=settings)
         prev = None
-        if avoid is not None:
-            prev = {ln.id: avoid.cells[ln.id] for ln in model_lines if ln.id in avoid.cells}
-        solver = _Solver(setup, spans, key, seed, rules, insts, settings, fixed, variation, prev)
+        if avoid is not None:  # the result being replaced and the earlier variations before it
+            prev = [{ln.id: cells_[ln.id] for ln in model_lines if ln.id in cells_}
+                    for cells_ in [avoid.cells] + list(avoid.meta.get("previous", []))]
+        solver = _Solver(setup, spans, key, seed, rules, insts, settings, fixed, variation, prev, extras)
+        solver.on_empty = on_empty
         path = solver.solve()
         for ln in model_lines:
             cells[ln.id] = [c.p(ln.id) for c in path]
@@ -1066,8 +1406,12 @@ def generate(chords: list[ChordSpan], key: Key, *, seed: int = 1, ensemble: Ense
             labels[ln.id] = list(locked.meta["labels"][ln.id]) if ln.id in locked_ids else list(fixed.labels[ln.id])
     meta = {"voices": voicing, "labels": labels, "settings": settings, "variation": variation,
             "sources": [approach] * n, "fixed": set(fcells), "model": [ln.id for ln in model_lines],
-            "free": set(), "origin": None}
+            "free": set(), "origin": None, "figures": dict(fixed.figures) if fixed is not None else {},
+            "extras": extras, "info": info,
+            "previous": ([avoid.cells] + list(avoid.meta.get("previous", [])))[:REGEN_MEMORY] if avoid else []}
     orch = _finish(approach, key, seed, spans, all_lines, cells, meta, settings, rules, insts)
+    # problems only between your own inputs (kept voicing, locked parts, melody and bass file) are shown, not
+    # discarded; everything the generator adds must be clean
     bad = _must_fix(orch.report, rules, set(fcells))
     if bad:  # should never happen: every rule is enforced above
         raise GenerationError("The generated result failed the rule checker, so it was discarded:\n"
@@ -1075,15 +1419,504 @@ def generate(chords: list[ChordSpan], key: Key, *, seed: int = 1, ensemble: Ense
     return orch
 
 
+# ---------------------------------------------------------------- melody and bass files
+# Melody instrument, by approach (first one that is playing and fits the melody's register wins)
+MELODY_HOSTS = {
+    "A": ("horn", "violins_1", "clarinet", "english_horn", "violas", "oboe", "flute", "trumpet", "violins_2",
+          "tenor_trombone", "choir_soprano", "choir_alto", "choir_tenor"),
+    "B": ("violins_1", "horn", "flute", "trumpet", "oboe", "clarinet", "violins_2", "violas", "english_horn",
+          "tenor_trombone", "choir_soprano", "choir_alto", "choir_tenor"),
+    "C": ("flute", "violins_1", "trumpet", "oboe", "piccolo", "clarinet", "violins_2", "horn", "violas",
+          "choir_soprano", "choir_alto", "choir_tenor"),
+}
+DOUBLE_HOSTS = {
+    "up": ("flute", "piccolo", "violins_1", "oboe", "violins_2", "clarinet", "trumpet", "choir_soprano"),
+    "down": ("violas", "horn", "cellos", "clarinet", "violins_2", "english_horn", "tenor_trombone", "bassoon",
+             "bass_clarinet", "choir_tenor", "choir_alto"),
+}
+AUTO_DOUBLE = {"A": "down", "B": "up", "C": "up"}  # Auto: at Density 4-5 of the melody's section
+EXPORT_CODE = {
+    "piccolo": "Picc", "flute": "Fl", "oboe": "Ob", "english_horn": "EH", "clarinet": "Cl", "bass_clarinet": "BCl",
+    "bassoon": "Bn", "contrabassoon": "Cbn", "horn": "Hn", "trumpet": "Tpt", "tenor_trombone": "Tbn",
+    "bass_trombone": "BTbn", "tuba": "Tba", "violins_1": "Vln1", "violins_2": "Vln2", "violas": "Vla",
+    "cellos": "Vc", "basses": "Cb", "choir_soprano": "ChS", "choir_alto": "ChA", "choir_tenor": "ChT",
+    "choir_bass": "ChB",
+}
+MELODY_ID, DOUBLE_ID = "mel", "mel-8"
+BASS_FILE_OCTAVES = {"btbn": (-12, 0)}  # SPEC §5 step 2: bass trombone on the lower octave when it fits
+
+
+def _inst_text(name: str) -> str:
+    """'Violins I' stays, 'French horn' -> 'French horn', 'Flute' -> 'flute'."""
+    return name if name.split()[0] in ("Violins", "French", "English") else name[0].lower() + name[1:]
+
+
+def clip_notes(notes, end: int) -> list[Note]:
+    return [Note(n.pitch, n.start, min(n.end, end), n.velocity) for n in notes if n.start < end and n.end > n.start]
+
+
+def _figures_from(notes: list[Note], spans: list[ChordSpan], fill: list[int | None] | None = None
+                  ) -> tuple[list[int | None], list[Figure | None]]:
+    """Cell pitch and figure per chord for a monophonic line. The cell is the note sounding at the chord's
+    start (or the first one starting in it). With `fill` (bass), a silent chord start is filled with that
+    pitch until the line's first note there."""
+    cells, figs = [], []
+    for i, span in enumerate(spans):
+        inside = [n for n in notes if n.start < span.end and n.end > span.start]
+        at = [n for n in inside if n.start <= span.start + TOLERANCE]
+        rows = []
+        if at:
+            cell = at[0].pitch
+        elif fill is not None and fill[i] is not None:
+            cell = fill[i]
+            first = min((n.start for n in inside), default=span.end)
+            rows.append((span.start, first, 0, False))
+        elif inside:
+            cell = inside[0].pitch
+        else:
+            cells.append(None)
+            figs.append(None)
+            continue
+        for nt in inside:
+            s, e = max(nt.start, span.start), min(nt.end, span.end)
+            if not rows and nt.start <= span.start + TOLERANCE:
+                s = span.start  # a note struck a hair late still starts the chord
+            if e > s:
+                rows.append((s, e, nt.pitch - cell, nt.start < span.start))
+        cells.append(cell)
+        figs.append(tuple(sorted(rows)))
+    return cells, figs
+
+
+def _fits(notes, inst: Instrument, moderate: bool, shift: int = 0) -> bool:
+    return all(inst.is_comfortable(n.pitch + shift) or (moderate and inst.is_playable(n.pitch + shift))
+               for n in notes)
+
+
+DOUBLE_DOWN_FLOOR = 55  # an octave-down doubling stays at G3 or above (clear of the bass register)
+
+
+def _melody_plan(ap: Approach, settings: Settings, ens: Ensemble, insts, spans, attempt: int = 0) -> dict | None:
+    """Which instrument plays the melody (and its octave doubling), and which model lines that replaces.
+    attempt 0 is the first choice; attempt 1 drops the doubling, 2 takes the next instrument with its
+    doubling, 3 the next instrument without. _NoMorePlans when there is no such plan."""
+    end = spans[-1].end
+    notes = clip_notes(settings.melody, end)
+    if not notes:
+        return None
+    available = ensemble_lines(ens, insts)
+    by_inst: dict[str, list[Line]] = {}
+    for ln in available:
+        by_inst.setdefault(ln.instrument, []).append(ln)
+    leaps = max((abs(b.pitch - a.pitch) for a, b in zip(notes, notes[1:])), default=0)
+
+    def eligible(iid: str) -> bool:
+        """Playing, has an upper (harmony) line to give up, and a choir voice only without big leaps."""
+        if iid not in by_inst or not any(ln.voices[0] in UPPER for ln in by_inst[iid]):
+            return False
+        if settings.keep is not None and insts[iid].section == "strings":
+            return False  # keep-as-is: the strings play your voicing
+        return insts[iid].section != "choir" or leaps <= 12
+
+    def moderate(iid):
+        return settings.character_for(insts[iid].section) == MODERATE
+
+    if settings.melody_instrument is not None:
+        iid = settings.melody_instrument
+        if iid not in by_inst:
+            raise _NoMorePlans(f"The melody instrument ({insts[iid].name if iid in insts else iid}) isn't playing.")
+        hosts = [(iid, o) for o in (0, -12, 12, -24, 24) if _fits(notes, insts[iid], moderate(iid), o)][:1]
+        if not hosts:
+            raise _NoMorePlans(f"The melody doesn't fit the {insts[iid].name}'s range, even an octave away.")
+    else:
+        hosts = [(iid, o) for o in (0, -12, 12) for iid in MELODY_HOSTS[ap.id]
+                 if eligible(iid) and _fits(notes, insts[iid], moderate(iid), o)]
+        if not hosts:
+            raise _NoMorePlans("No playing instrument can take the melody in its range. "
+                               "Turn on violins, horns or flutes, or switch Character to Moderate.")
+    if attempt // 2 >= len(hosts):
+        raise _NoMorePlans("no more melody plans")
+    host, shift = hosts[attempt // 2]
+    hl = by_inst[host]
+    top = max((ln for ln in hl if ln.voices[0] in UPPER), key=lambda ln: UPPER.index(ln.voices[0]), default=hl[0])
+    lines = [Line(MELODY_ID, host, f"{insts[host].name} melody", f"{EXPORT_CODE[host]}-mel", (), role="melody",
+                  forces=_ALL, program=top.program)]
+    drop = {top.id}
+    text = f"melody in the {_inst_text(insts[host].name)}" + (" (an octave down)" if shift < 0 else
+                                                         " (an octave up)" if shift > 0 else "")
+    direction = settings.melody_double
+    if direction == "auto":
+        direction = AUTO_DOUBLE[ap.id] if ens.density_for(insts[host].section) >= 4 else "off"
+    if attempt % 2 == 1:
+        if direction not in ("up", "down"):
+            raise _NoMorePlans("no more melody plans")
+        direction = "off"  # second try: without the doubling
+    dshift = 0
+    if direction in ("up", "down"):
+        d = 12 if direction == "up" else -12
+        low_ok = d > 0 or min(nt.pitch for nt in notes) + shift + d >= DOUBLE_DOWN_FLOOR
+        dbl = next((iid for iid in DOUBLE_HOSTS[direction] if iid != host and eligible(iid) and low_ok
+                    and _fits(notes, insts[iid], moderate(iid), shift + d)), None)
+        if dbl is not None:
+            dl = by_inst[dbl]
+            dtop = max((ln for ln in dl if ln.voices[0] in UPPER), key=lambda ln: UPPER.index(ln.voices[0]),
+                       default=dl[0])
+            tag = "8va" if d > 0 else "8vb"
+            lines.append(Line(DOUBLE_ID, dbl, f"{insts[dbl].name} melody {tag}", f"{EXPORT_CODE[dbl]}-mel{tag}", (),
+                              role="melody", forces=_ALL, program=dtop.program))
+            drop.add(dtop.id)
+            dshift = d
+            text += f", doubled an octave {direction} in the {_inst_text(insts[dbl].name)}"
+    moved = [Note(nt.pitch + shift, nt.start, nt.end, nt.velocity) for nt in notes]
+    cells, figs = _figures_from(moved, spans)
+    out_cells = {MELODY_ID: cells}
+    if len(lines) > 1:
+        out_cells[DOUBLE_ID] = [None if c is None else c + dshift for c in cells]
+    lo = []
+    for span in spans:
+        inside = [nt.pitch for nt in moved if nt.start < span.end and nt.end > span.start]
+        lo.append(min(inside) if inside else None)
+    return {"lines": lines, "drop": drop, "cells": out_cells, "figures": figs, "lo": lo, "text": text,
+            "host": host}
+
+
+def independent_bass(spans: list[ChordSpan], key: Key) -> list[Note]:
+    """Moderate mode's independent bass (SPEC §5 step 2): the chord's bass note, moving by diatonic step toward
+    the next chord's bass at the end of chords at least a half note long (at most two passing notes)."""
+    scale = key.scale_pcs()
+    tie = _ties(spans)
+    prev = 45
+    pitches = []
+    for span in spans:
+        cands = [p for p in range(36, 56) if p % 12 == span.label.bass]
+        p = min(cands, key=lambda q: (abs(q - prev), q))
+        while p > BASS_WINDOW[1]:
+            p -= 12
+        while p < BASS_WINDOW[0]:
+            p += 12
+        pitches.append(p)
+        prev = p
+    notes: list[Note] = []
+    for i, span in enumerate(spans):
+        p, length = pitches[i], span.end - span.start
+        if i > 0 and tie[i - 1] and notes and notes[-1].pitch == p and notes[-1].end == span.start:
+            start = notes.pop().start
+        else:
+            start = span.start
+        nxt = pitches[i + 1] if i + 1 < len(spans) and not tie[i] else None
+        steps = []
+        if nxt is not None and length >= 2 * 480 and abs(nxt - p) > 2:
+            up = nxt > p
+            between = [q for q in (range(p + 1, nxt) if up else range(p - 1, nxt, -1)) if q % 12 in scale]
+            steps = between[-2:]
+        if not steps:
+            notes.append(Note(p, start, span.end, 100))
+            continue
+        step = 480 if length >= 4 * 480 else 240
+        first = span.end - step * len(steps)
+        notes.append(Note(p, start, first, 100))
+        for k, q in enumerate(steps):
+            notes.append(Note(q, first + k * step, first + (k + 1) * step, 100))
+    return notes
+
+
+def _bass_plan(settings: Settings, model_lines: list[Line], insts, spans, key) -> dict | None:
+    """The bass file (or the independent bass) for every model line on the bass voice except the choir bass:
+    the line is moved by octaves to the bass voice's register, then each line plays it at its own octave."""
+    carriers = [ln for ln in model_lines if ln.voices and ln.voices[0] == "B" and ln.id != CHOIR_BASS]
+    if not carriers:
+        return None
+    if settings.bass:
+        kind = "file"
+        notes = clip_notes(settings.bass, spans[-1].end)
+    elif settings.independent_bass and all(
+            settings.character_for(insts[ln.instrument].section) == MODERATE for ln in carriers):
+        kind = "independent"
+        notes = independent_bass(spans, key)
+    else:
+        return None
+    # the choir bass sings the line too (holding the chord's bass under passing notes would clash), unless
+    # that would make it leap more than an octave: then it keeps singing the chord's bass note
+    carriers += [ln for ln in model_lines if ln.id == CHOIR_BASS]
+    if not notes:
+        return None
+    mid = (BASS_WINDOW[0] + BASS_WINDOW[1]) / 2
+
+    def spread(k):
+        ps = [nt.pitch + 12 * k for nt in notes]
+        return sum(max(0, BASS_WINDOW[0] - p, p - BASS_WINDOW[1]) for p in ps), abs(sum(ps) / len(ps) - mid)
+
+    k = min(range(-4, 5), key=spread)
+    ref = [Note(nt.pitch + 12 * k, nt.start, nt.end, nt.velocity) for nt in notes]
+    # a silent chord start is filled with the chord's bass note nearest the line
+    fill, last = [], ref[0].pitch
+    for span in spans:
+        sounding = [nt.pitch for nt in ref if nt.start <= span.start + TOLERANCE and nt.end > span.start]
+        if sounding:
+            last = sounding[0]
+            fill.append(None)
+        else:
+            cands = [p for p in range(last - 6, last + 7) if p % 12 == span.label.bass]
+            fill.append(cands[0])
+    pin, _ = _figures_from(ref, spans, fill)
+    lines, cells, figs, resting = [], {}, {}, []
+    for ln in carriers:
+        moderate = settings.character_for(insts[ln.instrument].section) == MODERATE
+        inst = insts[ln.instrument]
+
+        def ok(q, inst=inst, moderate=moderate):
+            return inst.is_comfortable(q) or (moderate and inst.is_playable(q))
+
+        offs = BASS_FILE_OCTAVES.get(ln.id, ln.octaves)
+        # the line's octave: the first of its octaves that fits every note, else the one that fits most;
+        # notes outside its range there move by an octave (a real bass part would do the same)
+        off = next((o for o in offs if sum(ok(nt.pitch + o) for nt in ref) * 3 >= 2 * len(ref)), None)
+        if off is None:
+            off = max(offs, key=lambda o: sum(ok(nt.pitch + o) for nt in ref))
+        moved = []
+        for nt in ref:
+            q = nt.pitch + off
+            for d in (0, 12, -12, 24, -24):
+                if ok(q + d):
+                    q += d
+                    break
+            else:
+                q = None
+            if q is None:
+                break
+            moved.append(Note(q, nt.start, nt.end, nt.velocity))
+        else:
+            lfill = [None if f is None else next((f + off + d for d in (0, 12, -12) if ok(f + off + d)), None)
+                     for f in fill]
+            if all(f is not None or fill[i] is None for i, f in enumerate(lfill)):
+                c, fg = _figures_from(moved, spans, lfill)
+                seq = [c[i] + d for i in range(len(spans)) if c[i] is not None for _, _, d, _ in fg[i]]
+                if ln.id != CHOIR_BASS or all(abs(b - a) <= 12 for a, b in zip(seq, seq[1:])):
+                    lines.append(ln)
+                    cells[ln.id], figs[ln.id] = c, fg
+                    continue
+        if ln.id != CHOIR_BASS:
+            resting.append(ln.id)  # can't play the line: rests (the choir bass stays on the chord's bass)
+    if not lines:
+        return None
+    return {"lines": lines, "cells": cells, "figures": figs, "pin": pin, "kind": kind, "resting": resting}
+
+
 def _finish(approach, key, seed, spans, lines, cells, meta, settings: Settings, rules, insts,
             reason: str | None = None) -> Orchestration:
-    vel = settings.velocity
-    parts = build_parts(lines, spans, cells, meta["labels"], vel, insts)
-    report = check(parts, spans, key, SAFE, rules=rules, instruments=insts)
+    rules = rules or builtin_rules()
+    insts = insts or builtin_instruments()
+    mode = settings.mode({insts[ln.instrument].section for ln in lines})
+    parts = _render(lines, spans, cells, meta["labels"], settings, meta.get("figures") or {}, key, rules, insts,
+                    mode)
+    report = check(parts, spans, key, mode, rules=rules, instruments=insts)
     if reason is None:
-        reason = _reason(APPROACH[approach], lines, cells, insts, settings)
-    return Orchestration(approach, reason, key, SAFE, seed, list(spans), list(lines), parts, cells, report,
+        reason = _reason(APPROACH[approach], lines, cells, insts, settings, meta, spans, key)
+    vel = settings.velocity
+    return Orchestration(approach, reason, key, mode, seed, list(spans), list(lines), parts, cells, report,
                          vel, vel, meta)
+
+
+# ---------------------------------------------------------------- rendering (patterns, figures)
+def _alt_tone(pitch: int, label: ChordLabel, ok) -> int | None:
+    """16ths alternating: the next chord tone at least a minor 3rd below (or above) that the part can play."""
+    pcs = label.pcs()
+    for q in list(range(pitch - 3, pitch - 13, -1)) + list(range(pitch + 3, pitch + 13)):
+        if q % 12 in pcs and ok(q):
+            return q
+    return None
+
+
+def _window(parts: list[Part], i: int, notes_at) -> list[Part]:
+    """Checker parts for chord i alone, with the given notes per part (empty parts left out)."""
+    out = []
+    for p in parts:
+        ns = notes_at(p.id)
+        if ns:
+            da = (p.doubles_at[i],) if p.doubles_at is not None else None
+            out.append(replace(p, notes=tuple(ns), doubles_at=da))
+    return out
+
+
+def _render(lines: list[Line], spans: list[ChordSpan], cells, labels, settings: Settings,
+            figures: dict[str, list[Figure | None]], key: Key, rules: Rules, insts, mode: str) -> list[Part]:
+    """Checker parts with their real notes: rhythm patterns (SPEC §5c), the melody and bass files' rhythm,
+    per-section velocity and re-strike every bar.
+
+    Patterns are re-checked chord by chord against plain Sustain: where a pattern adds a rule problem at a
+    chord (an error or a generator_must_pass warning that Sustain doesn't have there), that chord first loses
+    its passing tones, then the parts named in the problem fall back to Sustain, then every patterned part.
+    """
+    n = len(spans)
+    tie = _ties(spans)
+    sec = {ln.id: insts[ln.instrument].section for ln in lines}
+    vel = {ln.id: settings.velocity_for(sec[ln.id]) for ln in lines}
+    want: dict[str, str] = {}
+    for ln in lines:
+        if ln.id in figures:
+            continue  # the melody and bass-file lines keep the file's rhythm
+        pt = settings.pattern_for(ln.id, sec[ln.id], ln.instrument)
+        want[ln.id] = pt if pat.allowed(pt, sec[ln.id] == "choir") else pat.SUSTAIN
+    patterned = [lid for lid, pt in want.items() if pt != pat.SUSTAIN]
+    uniform = len(set(vel.values())) <= 1 and (not vel or next(iter(vel.values())) == settings.velocity)
+    if not patterned and not figures and not settings.restrike_bars and uniform:
+        return build_parts(lines, spans, cells, labels, settings.velocity, insts, tie)  # exactly Milestone 4
+    by_id = {ln.id: ln for ln in lines}
+    scale = key.scale_pcs()
+    moderate = {lid for lid in by_id if settings.character_for(sec[lid]) == MODERATE}
+    level = {lid: [2] * n for lid in patterned}  # 2 pattern + passing tones, 1 pattern, 0 sustain
+
+    def ok_pitch(lid):
+        inst = insts[by_id[lid].instrument]
+        return lambda q: inst.is_comfortable(q) or (lid in moderate and inst.is_playable(q))
+
+    def effective(lid, i) -> str:
+        if lid in figures:
+            return "figure"
+        if lid in level and level[lid][i] == 0:
+            return pat.SUSTAIN
+        return want[lid]
+
+    def chord_notes(lid: str, i: int) -> list[Note]:
+        p = cells[lid][i]
+        if p is None:
+            return []
+        span, v = spans[i], vel[lid]
+        if lid in figures:
+            return figure_notes(p, figures[lid][i], span, v)
+        pt = effective(lid, i)
+        if pt == pat.SUSTAIN:
+            return [Note(p, span.start, span.end, v)]
+        alt = _alt_tone(p, span.label, ok_pitch(lid)) if pt == pat.SIXTEENTHS_ALT else None
+        passing = None
+        if (level[lid][i] >= 2 and pt in pat.PASSING_PATTERNS and lid in moderate and sec[lid] != "choir"
+                and i + 1 < n and not tie[i]):
+            q = pat.passing_pitch(p, cells[lid][i + 1], scale)
+            passing = q if q is not None and ok_pitch(lid)(q) else None
+        return pat.render(pt, p, span.start, span.end, v, alt=alt, passing=passing)
+
+    base = build_parts(lines, spans, cells, labels, settings.velocity, insts, tie)
+    if patterned:
+        for i, span in enumerate(spans):
+            here = [lid for lid in patterned if cells[lid][i] is not None]
+            if not here:
+                continue
+
+            def sustain_at(lid, i=i):
+                p = cells[lid][i]
+                if p is None:
+                    return []
+                if lid in figures:
+                    return figure_notes(p, figures[lid][i], spans[i], vel[lid])
+                return [Note(p, spans[i].start, spans[i].end, vel[lid])]
+
+            ref = check(_window(base, i, sustain_at), [span], key, mode, rules=rules, instruments=insts)
+            known = {x.message for x in ref.issues}
+            for _ in range(4):
+                rep = check(_window(base, i, lambda lid: chord_notes(lid, i)), [span], key, mode, rules=rules,
+                            instruments=insts)
+                bad = [x for x in _must_fix(rep, rules) if x.message not in known]
+                if not bad:
+                    break
+                if any(level[lid][i] == 2 for lid in here):
+                    for lid in here:
+                        level[lid][i] = min(level[lid][i], 1)
+                    continue
+                named = {pid for x in bad for pid in x.parts if pid in level and level[pid][i] > 0}
+                for lid in (named or here):
+                    level[lid][i] = 0
+        # passing tones change the note into the next chord: drop them where they add parallel 5ths/8ves
+        for i in range(n - 1):
+            here = [lid for lid in patterned if level[lid][i] == 2 and cells[lid][i] is not None]
+            if not here:
+                continue
+            two = [spans[i], spans[i + 1]]
+
+            def pair(parts=base, i=i):
+                out = []
+                for p in parts:
+                    ns = chord_notes(p.id, i) + chord_notes(p.id, i + 1)
+                    if ns:
+                        da = (p.doubles_at[i], p.doubles_at[i + 1]) if p.doubles_at is not None else None
+                        out.append(replace(p, notes=tuple(ns), doubles_at=da))
+                return out
+
+            with_pt = check(pair(), two, key, mode, rules=rules, instruments=insts)
+            n_with = len(with_pt.by_check("parallels")) + len(_must_fix(with_pt, rules))
+            saved = {lid: level[lid][i] for lid in here}
+            for lid in here:
+                level[lid][i] = 1
+            without = check(pair(), two, key, mode, rules=rules, instruments=insts)
+            if n_with <= len(without.by_check("parallels")) + len(_must_fix(without, rules)):
+                for lid, v in saved.items():
+                    level[lid][i] = v
+    merged: dict[str, list[Note]] = {}
+    for ln in lines:
+        lid = ln.id
+        out: list[Note] = []
+        for i in range(n):
+            ns = chord_notes(lid, i)
+            if ns and out and i > 0 and out[-1].pitch == ns[0].pitch and out[-1].end == ns[0].start:
+                if lid in figures:
+                    fig = figures[lid][i]
+                    join = bool(fig) and fig[0][3]
+                else:
+                    join = (tie[i - 1] and effective(lid, i) == pat.SUSTAIN
+                            and effective(lid, i - 1) == pat.SUSTAIN)
+                if join:
+                    first = ns[0]
+                    out[-1] = Note(first.pitch, out[-1].start, first.end, out[-1].velocity)
+                    ns = ns[1:]
+            out.extend(ns)
+        if settings.restrike_bars and lid not in figures:
+            out = pat.split_at_bars(out)
+        merged[lid] = out
+    return build_parts(lines, spans, cells, labels, settings.velocity, insts, tie, notes=merged)
+
+
+def rerender(orch: Orchestration, settings: Settings, rules=None, instruments=None) -> Orchestration:
+    """The same pitches with other render-only settings (dynamics, patterns, re-strike). Nothing is
+    regenerated; the checker runs again."""
+    rules = rules or builtin_rules()
+    insts = instruments or builtin_instruments()
+    meta = dict(orch.meta, settings=settings)
+    new = _finish(orch.approach, orch.key, orch.seed, orch.chords, orch.lines, orch.cells, meta, settings, rules,
+                  insts, reason=orch.reason)
+    new.report.issues.extend(swap_leaps(new, rules, insts))
+    return new
+
+
+RENDER_ONLY = ("dynamics", "section_dynamics", "pattern", "section_patterns", "instrument_patterns", "part_patterns",
+               "restrike_bars")
+
+
+def swap_leaps(orch: Orchestration, rules=None, instruments=None) -> list[Issue]:
+    """Leaps that swapped chords made bigger than they were before the swap (and at least
+    rules.swap_leap_min semitones), on both sides of every swapped chord."""
+    rules = rules or builtin_rules()
+    sources = orch.sources
+    if orch.meta.get("origin") is None or all(s == orch.approach for s in sources):
+        return []
+    base = orch.meta["origin"].cells
+    swapped = {i for i, s in enumerate(sources) if s != orch.approach}
+    edges = sorted({e for i in swapped for e in (i, i + 1) if 0 < e < len(orch.chords)})
+    out = []
+    for e in edges:
+        for ln in orch.lines:
+            a, b = orch.cells[ln.id][e - 1], orch.cells[ln.id][e]
+            if a is None or b is None:
+                continue
+            new = abs(b - a)
+            ba, bb = base.get(ln.id, [None] * len(orch.chords))[e - 1], base.get(ln.id, [None] * len(orch.chords))[e]
+            old = abs(bb - ba) if ba is not None and bb is not None else 0
+            if new >= rules.swap_leap_min and new > old:
+                span = orch.chords[e]
+                out.append(Issue("swap_leap", WARNING,
+                                 f"{ln.label} leaps {new} semitones ({note_name(a, 'ableton', orch.key)} to "
+                                 f"{note_name(b, 'ableton', orch.key)}) into {position_text(span.start)} "
+                                 f"({span.label.symbol(orch.key)}) after the swap.",
+                                 (ln.id,), e, span.start, (a, b)))
+    return out
 
 
 def generate_all(chords, key, *, seed: int = 1, settings: Settings | None = None,
@@ -1103,20 +1936,20 @@ def generate_all(chords, key, *, seed: int = 1, settings: Settings | None = None
     return out
 
 
-def with_dynamics(orch: Orchestration, dynamics: str, rules=None, instruments=None) -> Orchestration:
-    """The same notes at another dynamic (velocity and CC1). Nothing is regenerated."""
-    settings = replace(orch.settings, dynamics=dynamics)
-    meta = dict(orch.meta, settings=settings)
-    insts = instruments or builtin_instruments()
-    vel = settings.velocity
-    parts = [replace(p, notes=tuple(Note(n.pitch, n.start, n.end, vel) for n in p.notes)) for p in orch.parts]
-    return replace(orch, parts=parts, velocity=vel, cc1=vel, meta=meta)
+def with_dynamics(orch: Orchestration, dynamics: str, rules=None, instruments=None,
+                  section_dynamics=()) -> Orchestration:
+    """The same notes at another dynamic (velocity and CC1, optionally per section). Nothing is regenerated."""
+    return rerender(orch, replace(orch.settings, dynamics=dynamics, section_dynamics=section_dynamics),
+                    rules, instruments)
 
 
-def _reason(ap: Approach, lines: list[Line], cells, insts, settings: Settings) -> str:
+def _reason(ap: Approach, lines: list[Line], cells, insts, settings: Settings, meta: dict | None = None,
+            spans=None, key: Key | None = None) -> str:
     """One line on what this alternative does, from what actually plays."""
+    meta = meta or {}
     playing = {ln.id for ln in lines if any(p is not None for p in cells[ln.id])}
-    secs = {insts[LINE_BY_ID.get(lid, KEEP_LINE_BY_ID.get(lid)).instrument].section for lid in playing}
+    inst_of = {ln.id: ln.instrument for ln in lines}
+    secs = {insts[inst_of[lid]].section for lid in playing}
     has = playing.__contains__
     horns = any(has(f"hn{i}") for i in range(1, 5))
     bits = []
@@ -1163,5 +1996,17 @@ def _reason(ap: Approach, lines: list[Line], cells, insts, settings: Settings) -
     if any(lid in playing for lid in CHOIR_IDS):
         n_ch = sum(lid in playing for lid in CHOIR_IDS)
         bits.append("choir in four parts" if n_ch == 4 else f"choir in {n_ch} parts")
+    info = meta.get("info") or {}
+    if info.get("melody"):
+        bits.append(info["melody"])
+    if info.get("bass") == "file":
+        bits.append("bass line from your file in octaves")
+    elif info.get("bass") == "independent":
+        bits.append("independent bass moving by step")
+    if settings.mode() == MODERATE:
+        colours = sum(any(p % 12 in colour_pcs(c.label, key) for k, p in v.items() if k in UPPER)
+                      for v, c in zip(meta.get("voices") or [], spans or [])) if key is not None else 0
+        bits.append(f"9th/sus/6th colour on {colours} chord{'s' * (colours != 1)}" if colours
+                    else "moderate range")
     text = ", ".join(bits)
     return f"{ap.name}: {text[0].lower() + text[1:] if text else text}."

@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 
 from ..instruments import instruments
 from ..midi_io import BAR
+from ..patterns import PATTERN_SHORT
 from ..theory import Key, note_name
 from .theme import MUTED, PANEL, TEXT
 
@@ -130,7 +131,8 @@ class PartGrid(QTableWidget):
             self.horizontalHeaderItem(CTRL_COLS + i).setToolTip(
                 "Click for this chord's menu: regenerate it, or use another alternative's voicing"
                 + (f" (now: alternative {sources[i]}'s voicing)" if sources[i] != orch.approach else ""))
-        self.setVerticalHeaderLabels([("🔒 " if ln.id in locked else "") + ln.label for ln in lines])
+        self.row_labels = {ln.id: ln.label + self._tag(orch, ln, insts) for ln in lines}
+        self.setVerticalHeaderLabels([("🔒 " if ln.id in locked else "") + self.row_labels[ln.id] for ln in lines])
         hh = self.horizontalHeader()
         for c in range(CTRL_COLS):
             hh.setSectionResizeMode(c, QHeaderView.Fixed)
@@ -164,10 +166,13 @@ class PartGrid(QTableWidget):
                 handle.setEnabled(False)
             self.setCellWidget(r, 3, handle)
             cells = orch.cells[ln.id]
+            starts = [n.start for n in orch.part(ln.id).notes]
             for i, p in enumerate(cells):
+                n_here = sum(chords[i].start <= t < chords[i].end for t in starts)
                 held = (i > 0 and p is not None and cells[i - 1] == p and chords[i - 1].label == chords[i].label
                         and chords[i - 1].end == chords[i].start)
-                text = "–" if p is None else ("~ " if held else "") + note_name(p, name_style, key)
+                text = "–" if p is None else ("~ " if held else "") + note_name(p, name_style, key) + (
+                    " ♪" if n_here > 1 else "")
                 item = QTableWidgetItem(text)
                 item.setTextAlignment(Qt.AlignCenter)
                 bg = RED_BG if (ln.id, i) in errors else (WARN_BG if (ln.id, i) in warn else None)
@@ -179,7 +184,8 @@ class PartGrid(QTableWidget):
                 else:
                     item.setForeground(QBrush(QColor(TEXT)))
                 tip = f"{ln.label}: " + ("rests" if p is None else note_name(p, name_style, key)
-                                         + (" (held from the previous chord)" if held else ""))
+                                         + (" (held from the previous chord)" if held else "")
+                                         + (f", {n_here} notes in this chord" if n_here > 1 else ""))
                 if p is not None:
                     regs = inst.register_notes(p)
                     if regs:
@@ -189,10 +195,19 @@ class PartGrid(QTableWidget):
                 item.setToolTip(tip)
                 self.setItem(r, CTRL_COLS + i, item)
 
+    @staticmethod
+    def _tag(orch, ln, insts) -> str:
+        """Row tag: the part's rhythm (pattern, or your melody/bass file)."""
+        if ln.id in orch.figures:
+            return "" if ln.role == "melody" else " · bass file"
+        pt = orch.settings.pattern_for(ln.id, insts[ln.instrument].section, ln.instrument)
+        return f" · {PATTERN_SHORT[pt]}" if pt in PATTERN_SHORT else ""
+
     def set_locked(self, line_id: str, on: bool, label: str):
         """Update a row's lock mark without rebuilding the grid."""
         if line_id in self.line_ids:
             r = self.line_ids.index(line_id)
+            label = getattr(self, "row_labels", {}).get(line_id, label)
             self.setVerticalHeaderItem(r, QTableWidgetItem(("🔒 " if on else "") + label))
             b = self.lock_buttons.get(line_id)
             if b is not None and b.isChecked() != on:

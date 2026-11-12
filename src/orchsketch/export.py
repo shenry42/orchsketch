@@ -1,7 +1,7 @@
 """Per-part MIDI export (SPEC §7), Milestone 3.
 
 One type-0 file per part line (divisi lines are separate files), concert pitch, 480 PPQ, 4/4, the app's
-tempo, starting at bar 1 with no lead-in, and one constant CC1 value at the start.
+tempo, starting at bar 1 with no lead-in, and one constant CC1 value at the start (the part's section Dynamics).
 Name: {ProjectName}_{Part}_{Alt}.mid, e.g. NightRise_Vln1-a_A.mid.
 """
 from __future__ import annotations
@@ -37,7 +37,8 @@ def export_part(orch: Orchestration, line_id: str, folder: Path | str, project: 
     if not part.notes:
         return None
     path = Path(folder) / part_filename(project, line.export, orch.approach)
-    return write_notes(path, list(part.notes), tempo, track_name=line.label, length=length, cc1=orch.cc1)
+    return write_notes(path, list(part.notes), tempo, track_name=line.label, length=length,
+                       cc1=orch.cc1_for(line_id))
 
 
 def export_parts(orch: Orchestration, folder: Path | str, project: str, tempo: float, length: int,

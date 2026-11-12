@@ -233,7 +233,7 @@ def test_unplayable_request_raises_a_clear_error():
             generate(chords, Key("C", "major"), approach=a, ensemble=Ensemble(frozenset({"choir"})))
 
 
-def test_only_safe_mode_until_milestone_5():
+def test_mode_must_be_safe_or_moderate():
     chords = ex.chords(["C"])
     with pytest.raises(ValueError):
-        generate(chords, Key("C", "major"), mode="moderate")
+        generate(chords, Key("C", "major"), mode="wild")  # wild mode is reserved for later (SPEC §6)

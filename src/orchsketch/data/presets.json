@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "about": "Ensemble presets (SPEC §6). instruments: ids from data/instruments. forces: solo / section / divisi. density: 1 (sparse) to 5 (full). dynamics: pp p mp mf f ff. Roles and patterns join the presets in Milestone 5.",
+  "about": "Ensemble presets (SPEC §6). instruments: ids from data/instruments. forces: solo / section / divisi. density: 1 (sparse) to 5 (full). dynamics: pp p mp mf f ff. character: safe / moderate. patterns (optional): section or instrument id -> sustain / 8ths / 16ths / 16ths_alt / stabs / half_time (anything not listed sustains). sections (optional): per-section slider values, e.g. {\"brass\": {\"density\": 3}}.",
   "presets": [
     {"id": "strings_only", "name": "Strings only",
      "instruments": ["violins_1", "violins_2", "violas", "cellos", "basses"],
@@ -17,7 +17,9 @@
                      "contrabassoon", "horn", "trumpet", "tenor_trombone", "bass_trombone", "tuba",
                      "violins_1", "violins_2", "violas", "cellos", "basses",
                      "choir_soprano", "choir_alto", "choir_tenor", "choir_bass"],
-     "forces": "section", "density": 5, "dynamics": "mf"},
+     "forces": "section", "density": 5, "dynamics": "mf",
+     "patterns": {"strings": "8ths", "tenor_trombone": "half_time", "bass_trombone": "half_time",
+                  "tuba": "half_time"}},
     {"id": "woodwinds_strings_soft", "name": "Woodwinds + strings (soft)",
      "instruments": ["flute", "oboe", "english_horn", "clarinet", "bass_clarinet", "bassoon",
                      "violins_1", "violins_2", "violas", "cellos", "basses"],
@@ -25,6 +27,7 @@
     {"id": "low_heavy", "name": "Low and heavy",
      "instruments": ["violas", "cellos", "basses", "tenor_trombone", "bass_trombone", "tuba", "contrabassoon",
                      "choir_tenor", "choir_bass"],
-     "forces": "section", "density": 5, "dynamics": "f"}
+     "forces": "section", "density": 5, "dynamics": "f",
+     "patterns": {"strings": "8ths", "tenor_trombone": "stabs", "bass_trombone": "stabs", "tuba": "stabs"}}
   ]
 }

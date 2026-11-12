@@ -36,5 +36,11 @@ def test_bad_presets_are_rejected():
         parse_preset({"id": "x", "name": "X", "instruments": ["kazoo"]})
     with pytest.raises(DataError, match="out of range"):
         parse_preset({"id": "x", "name": "X", "instruments": ["horn"], "density": 9})
-    with pytest.raises(DataError, match="Milestone 5"):
-        parse_preset({"id": "x", "name": "X", "instruments": ["horn"], "character": "moderate"})
+    with pytest.raises(DataError, match="safe or moderate"):
+        parse_preset({"id": "x", "name": "X", "instruments": ["horn"], "character": "wild"})
+    with pytest.raises(DataError, match="unknown pattern"):
+        parse_preset({"id": "x", "name": "X", "instruments": ["horn"], "patterns": {"brass": "polka"}})
+    with pytest.raises(DataError, match="unknown section or instrument"):
+        parse_preset({"id": "x", "name": "X", "instruments": ["horn"], "patterns": {"kazoo": "8ths"}})
+    with pytest.raises(DataError, match="bad value"):
+        parse_preset({"id": "x", "name": "X", "instruments": ["horn"], "sections": {"brass": {"density": 9}}})

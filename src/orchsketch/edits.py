@@ -17,15 +17,14 @@ from __future__ import annotations
 import random
 from dataclasses import replace
 
-from .checker import Issue, check
+from .checker import check
 from .generator import (
     APPROACH, CHOIR_IDS, KEEP_LINE_BY_ID, SAME_AS_BEFORE_COST, SECTION_PRIORITY, GenerationError, Orchestration,
-    _Cand, _Fixed, _finish, _must_fix, _parallel, _Setup, _Solver, _ties, approach_lines, generate,
+    _Cand, _Fixed, _finish, _must_fix, _parallel, _Setup, _Solver, _ties, approach_lines, generate, swap_leaps,
 )
 from .instruments import instruments as builtin_instruments
 from .midi_io import BAR, position_text
-from .rules import SAFE, WARNING, rules as builtin_rules
-from .theory import note_name
+from .rules import rules as builtin_rules
 
 
 def _ctx(rules, insts):
@@ -86,6 +85,10 @@ def regenerate_part(orch: Orchestration, line_id: str, *, variation: int | None 
     rules, insts = _ctx(rules, instruments)
     variation = next_variation(orch) if variation is None else variation
     line = orch.line(line_id)
+    if line_id in orch.figures:
+        what = "melody" if line.role == "melody" else "bass line"
+        raise GenerationError(f"{line.label} plays your {what} as written, so it can't be regenerated. "
+                              "Lock it, or remove the file to orchestrate it freely.")
     inst = insts[line.instrument]
     old = orch.cells[line_id]
     spans = orch.chords
@@ -116,7 +119,7 @@ def regenerate_part(orch: Orchestration, line_id: str, *, variation: int | None 
                 cells[line_id][i] = p
                 labels[line_id][i] = f"free:{line_id}"
                 parts = _one_chord_parts(orch, cells, labels, i, insts)
-                rep = check(parts, [span], orch.key, SAFE, rules=rules, instruments=insts)
+                rep = check(parts, [span], orch.key, orch.mode, rules=rules, instruments=insts)
                 bad = [x for x in _must_fix(rep, rules) if x.message not in base and line_id in x.parts
                        or (not x.parts and x.message not in base)]
                 if bad:
@@ -161,10 +164,12 @@ def regenerate_part(orch: Orchestration, line_id: str, *, variation: int | None 
 
 
 def _one_chord_parts(orch, cells, labels, i, insts):
-    from .generator import build_parts
+    from .generator import build_parts, figure_notes
     span = orch.chords[i]
+    figs = orch.figures
+    notes = {lid: figure_notes(cells[lid][i], figs[lid][i], span, orch.velocity) for lid in figs if lid in cells}
     return build_parts(orch.lines, [span], {k: [v[i]] for k, v in cells.items()},
-                       {k: [v[i]] for k, v in labels.items()}, orch.velocity, insts, tie=[])
+                       {k: [v[i]] for k, v in labels.items()}, orch.velocity, insts, tie=[], notes=notes or None)
 
 
 def _path(layers, trans):
@@ -214,11 +219,14 @@ def regenerate_chord(orch: Orchestration, index: int, locked_ids=frozenset(), *,
         raise GenerationError("Every part of this chord is locked or kept, so there is nothing to regenerate.")
     fixed_lines = [ln for ln in orch.lines if ln.id in fixed_ids]
     cells, labels, voices = _copy(orch)
+    figs = orch.figures
     fixed = _Fixed(fixed_lines, {ln.id: cells[ln.id] for ln in fixed_lines},
-                   {ln.id: [None if x is None else f"lock:{x}" for x in labels[ln.id]] for ln in fixed_lines})
-    setup = _Setup(model, insts, ap, need_bass=False)
+                   {ln.id: [None if x is None else (x if ln.id in figs else f"lock:{x}") for x in labels[ln.id]]
+                    for ln in fixed_lines},
+                   {ln.id: list(figs[ln.id]) for ln in fixed_lines if ln.id in figs})
+    setup = _Setup(model, insts, ap, need_bass=False, settings=orch.settings)
     solver = _Solver(setup, spans, orch.key, orch.seed, rules, insts, orch.settings, fixed, variation,
-                     avoid={ln.id: cells[ln.id] for ln in model})
+                     avoid={ln.id: cells[ln.id] for ln in model}, extras=orch.meta.get("extras"))
     current = tuple((ln.id, cells[ln.id][index]) for ln in model)
     cands = solver.valid(index, exclude_keys={current})
     if not cands:
@@ -300,32 +308,3 @@ def unswap(orch: Orchestration, chords: list[int], locked_ids=frozenset(), *, ru
            instruments=None) -> Orchestration:
     """Put these chords back to the alternative's own voicing."""
     return swap(orch, origin(orch), chords, locked_ids, rules=rules, instruments=instruments)
-
-
-def swap_leaps(orch: Orchestration, rules=None, instruments=None) -> list[Issue]:
-    """Leaps that swapped chords made bigger than they were before the swap (and at least
-    rules.swap_leap_min semitones), on both sides of every swapped chord."""
-    rules, insts = _ctx(rules, instruments)
-    sources = orch.sources
-    if orch.meta.get("origin") is None or all(s == orch.approach for s in sources):
-        return []
-    base = orch.meta["origin"].cells
-    swapped = {i for i, s in enumerate(sources) if s != orch.approach}
-    edges = sorted({e for i in swapped for e in (i, i + 1) if 0 < e < len(orch.chords)})
-    out = []
-    for e in edges:
-        for ln in orch.lines:
-            a, b = orch.cells[ln.id][e - 1], orch.cells[ln.id][e]
-            if a is None or b is None:
-                continue
-            new = abs(b - a)
-            ba, bb = base.get(ln.id, [None] * len(orch.chords))[e - 1], base.get(ln.id, [None] * len(orch.chords))[e]
-            old = abs(bb - ba) if ba is not None and bb is not None else 0
-            if new >= rules.swap_leap_min and new > old:
-                span = orch.chords[e]
-                out.append(Issue("swap_leap", WARNING,
-                                 f"{ln.label} leaps {new} semitones ({note_name(a, 'ableton', orch.key)} to "
-                                 f"{note_name(b, 'ableton', orch.key)}) into {position_text(span.start)} "
-                                 f"({span.label.symbol(orch.key)}) after the swap.",
-                                 (ln.id,), e, span.start, (a, b)))
-    return out

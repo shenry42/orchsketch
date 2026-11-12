@@ -247,16 +247,28 @@ class _Checker:
                                  tuple(parts), chord, tick, tuple(pitches)))
 
     def slices(self):
-        """(tick, [(part, pitch), ...]) for every span where the sounding notes don't change."""
+        """(tick, [(part, pitch), ...]) for every span where the sounding notes don't change.
+        One sweep over the notes; `sounding` lists parts in part order, notes in note order."""
         bounds = {c.start for c in self.chords}
-        for p in self.parts:
-            for nt in p.notes:
+        events = []
+        for pi, p in enumerate(self.parts):
+            for ni, nt in enumerate(p.notes):
                 bounds.update((nt.start, nt.end))
+                if nt.end > nt.start:
+                    events.append((nt.start, nt.end, pi, ni, p, nt.pitch))
+        events.sort(key=lambda e: e[0])
         out = []
+        active: dict[tuple[int, int], tuple] = {}
+        k = 0
         for t in sorted(bounds):
-            sounding = [(p, nt.pitch) for p in self.parts for nt in p.notes if nt.start <= t < nt.end]
-            if sounding:
-                out.append((t, sounding))
+            while k < len(events) and events[k][0] <= t:
+                e = events[k]
+                active[(e[2], e[3])] = e
+                k += 1
+            for key in [key for key, e in active.items() if e[1] <= t]:
+                del active[key]
+            if active:
+                out.append((t, [(e[4], e[5]) for _, e in sorted(active.items())]))
         return out
 
     @staticmethod
@@ -341,10 +353,11 @@ class _Checker:
                              f"{self.where(t, c)} is below the low-interval limit; its lower note must be "
                              f"{self.n(limit)} or higher.",
                              ps, c, t, [lo, hi], dedupe=(c, lo, hi))
-            # spacing, per section
+            # spacing, per section (a melody line is a line on its own, not part of the section's chord)
             sections: dict[str, dict[int, list[Part]]] = defaultdict(lambda: defaultdict(list))
             for p, pitch in sounding:
-                sections[self.inst[p.instrument].section][pitch].append(p)
+                if p.role != "melody":
+                    sections[self.inst[p.instrument].section][pitch].append(p)
             for sec, sp in sections.items():
                 sp_pitches = sorted(sp)
                 for lo, hi in zip(sp_pitches, sp_pitches[1:]):
