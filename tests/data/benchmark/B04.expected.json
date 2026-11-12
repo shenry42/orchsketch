@@ -1,0 +1,36 @@
+{
+  "test": "B4",
+  "file": "B04.mid",
+  "key": {
+    "tonic": "E",
+    "mode": "minor"
+  },
+  "bars": 4,
+  "intended": "i - bV - bII - V",
+  "chords": [
+    {
+      "start_beat": 0.0,
+      "beats": 4.0,
+      "label": "Em",
+      "roman": "i"
+    },
+    {
+      "start_beat": 4.0,
+      "beats": 4.0,
+      "label": "Bb",
+      "roman": "bV"
+    },
+    {
+      "start_beat": 8.0,
+      "beats": 4.0,
+      "label": "F/A",
+      "roman": "bII6"
+    },
+    {
+      "start_beat": 12.0,
+      "beats": 4.0,
+      "label": "B",
+      "roman": "V"
+    }
+  ]
+}

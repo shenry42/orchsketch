@@ -87,3 +87,24 @@ def test_parse_symbol(text, root, quality, bass):
 def test_parse_symbol_rejects(text):
     with pytest.raises(SymbolError):
         parse_symbol(text)
+
+
+# Benchmark (v1.1): a chord on the tritone reads #IV or bV, spelled to match, by whichever gives the
+# chord's own tones the fewest accidentals; on a tie the key's usual spelling decides.
+@pytest.mark.parametrize("pitches,key,symbol,roman", [
+    ([46, 53, 58, 62], Key("E", "minor"), "Bb", "bV"),           # benchmark B04 (was A# · #IV)
+    ([38, 54, 57, 62], Key("G#", "minor"), "D", "bV"),           # benchmark B02 (was D · #IV)
+    ([42, 54, 57, 60], C, "F#dim", "#iv°"),                      # diminished stays #iv°
+    ([39, 54, 57, 60], AM, "D#dim7", "#iv°7"),
+    ([42, 54, 58, 61], C, "F#", "#IV"),                          # tie: C major keeps F#
+    ([47, 59, 63, 66], Key("F", "minor"), "B", "#IV"),           # B D# F# beats Cb Eb Gb
+    ([50, 53, 58, 62], Key("E", "minor"), "Bb/D", "bV6"),        # inversion bass spelled with the chord
+])
+def test_tritone_root_spelling(pitches, key, symbol, roman):
+    s, r, _ = best(pitches, key)
+    assert (s, r) == (symbol, roman)
+
+
+def test_other_chromatic_roots_unchanged():
+    assert best([48, 56, 60, 63], C)[:2] == ("Ab/C", "bVI6")
+    assert best([49, 56, 61, 65], C)[:2] == ("Db", "bII")

@@ -1,0 +1,36 @@
+{
+  "test": "B8",
+  "file": "B08.mid",
+  "key": {
+    "tonic": "C",
+    "mode": "minor"
+  },
+  "bars": 4,
+  "intended": "i - bvi - i - bII",
+  "chords": [
+    {
+      "start_beat": 0.0,
+      "beats": 4.0,
+      "label": "unrecognized",
+      "correct_to": "Cm"
+    },
+    {
+      "start_beat": 4.0,
+      "beats": 4.0,
+      "label": "unrecognized",
+      "correct_to": "Abm"
+    },
+    {
+      "start_beat": 8.0,
+      "beats": 4.0,
+      "label": "unrecognized",
+      "correct_to": "Cm"
+    },
+    {
+      "start_beat": 12.0,
+      "beats": 4.0,
+      "label": "unrecognized",
+      "correct_to": "Db"
+    }
+  ]
+}

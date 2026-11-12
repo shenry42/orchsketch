@@ -22,3 +22,5 @@ logs/
 checker_report.txt
 sound_check_results.txt
 testset_report.txt
+benchmark_report.txt
+/benchmark/

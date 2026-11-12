@@ -1,0 +1,36 @@
+{
+  "test": "B6",
+  "file": "B06.mid",
+  "key": {
+    "tonic": "D",
+    "mode": "minor"
+  },
+  "bars": 4,
+  "intended": "i - bIII - bVII - IV",
+  "chords": [
+    {
+      "start_beat": 0.0,
+      "beats": 4.0,
+      "label": "Dm",
+      "roman": "i"
+    },
+    {
+      "start_beat": 4.0,
+      "beats": 4.0,
+      "label": "F",
+      "roman": "III"
+    },
+    {
+      "start_beat": 8.0,
+      "beats": 4.0,
+      "label": "C",
+      "roman": "VII"
+    },
+    {
+      "start_beat": 12.0,
+      "beats": 4.0,
+      "label": "G",
+      "roman": "IV"
+    }
+  ]
+}

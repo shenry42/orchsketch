@@ -1,0 +1,36 @@
+{
+  "test": "B9",
+  "file": "B09.mid",
+  "key": {
+    "tonic": "A",
+    "mode": "minor"
+  },
+  "bars": 4,
+  "intended": "i - bVII - IV - i",
+  "chords": [
+    {
+      "start_beat": 0.0,
+      "beats": 4.0,
+      "label": "Am",
+      "roman": "i"
+    },
+    {
+      "start_beat": 4.0,
+      "beats": 4.0,
+      "label": "G",
+      "roman": "VII"
+    },
+    {
+      "start_beat": 8.0,
+      "beats": 4.0,
+      "label": "D",
+      "roman": "IV"
+    },
+    {
+      "start_beat": 12.0,
+      "beats": 4.0,
+      "label": "Am",
+      "roman": "i"
+    }
+  ]
+}

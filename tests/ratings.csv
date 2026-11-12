@@ -65,3 +65,36 @@ test,alternative,score,reason,app_version
 11,A,5,"Melody + bass files, re-test after the low-bass fix (tuba now follows the line)",1.0
 11,B,5,"Melody + bass files, re-test after the low-bass fix (tuba now follows the line)",1.0
 11,C,5,"Melody + bass files, re-test after the low-bass fix (tuba now follows the line)",1.0
+B1,A,5,"Benchmark (Sam's own progression): Full epic, safe, seed 1",1.1
+B1,B,5,"Benchmark (Sam's own progression): Full epic, safe, seed 1",1.1
+B1,C,5,"Benchmark (Sam's own progression): Full epic, safe, seed 1",1.1
+B1,A,5,Benchmark (Sam's own progression) + melody and bass files,1.1
+B1,B,5,Benchmark (Sam's own progression) + melody and bass files,1.1
+B1,C,5,Benchmark (Sam's own progression) + melody and bass files,1.1
+B2,A,5,"Benchmark (Sam's own progression): Full epic, safe, seed 1",1.1
+B2,B,5,"Benchmark (Sam's own progression): Full epic, safe, seed 1",1.1
+B2,C,5,"Benchmark (Sam's own progression): Full epic, safe, seed 1",1.1
+B3,A,5,"Benchmark (Sam's own progression): Full epic, safe, seed 1",1.1
+B3,B,5,"Benchmark (Sam's own progression): Full epic, safe, seed 1",1.1
+B3,C,5,"Benchmark (Sam's own progression): Full epic, safe, seed 1",1.1
+B4,A,5,"Benchmark (Sam's own progression): Full epic, safe, seed 1",1.1
+B4,B,5,"Benchmark (Sam's own progression): Full epic, safe, seed 1",1.1
+B4,C,5,"Benchmark (Sam's own progression): Full epic, safe, seed 1",1.1
+B5,A,5,"Benchmark (Sam's own progression): Full epic, safe, seed 1",1.1
+B5,B,5,"Benchmark (Sam's own progression): Full epic, safe, seed 1",1.1
+B5,C,5,"Benchmark (Sam's own progression): Full epic, safe, seed 1",1.1
+B6,A,5,"Benchmark (Sam's own progression): Full epic, safe, seed 1",1.1
+B6,B,5,"Benchmark (Sam's own progression): Full epic, safe, seed 1",1.1
+B6,C,5,"Benchmark (Sam's own progression): Full epic, safe, seed 1",1.1
+B7,A,5,"Benchmark (Sam's own progression): Full epic, safe, seed 1",1.1
+B7,B,5,"Benchmark (Sam's own progression): Full epic, safe, seed 1",1.1
+B7,C,5,"Benchmark (Sam's own progression): Full epic, safe, seed 1",1.1
+B8,A,5,"Benchmark (Sam's own progression): Full epic, safe, seed 1",1.1
+B8,B,5,"Benchmark (Sam's own progression): Full epic, safe, seed 1",1.1
+B8,C,5,"Benchmark (Sam's own progression): Full epic, safe, seed 1",1.1
+B9,A,5,"Benchmark (Sam's own progression): Full epic, safe, seed 1",1.1
+B9,B,5,"Benchmark (Sam's own progression): Full epic, safe, seed 1",1.1
+B9,C,5,"Benchmark (Sam's own progression): Full epic, safe, seed 1",1.1
+B10,A,5,"Benchmark (Sam's own progression): Full epic, safe, seed 1",1.1
+B10,B,5,"Benchmark (Sam's own progression): Full epic, safe, seed 1",1.1
+B10,C,5,"Benchmark (Sam's own progression): Full epic, safe, seed 1",1.1

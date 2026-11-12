@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..theory import Key
+from ..theory import LETTERS, Key, _spell, parse_note_name
 
 # quality -> (intervals from root, 5th may be omitted, simplicity prior)
 QUALITIES: dict[str, tuple[tuple[int, ...], bool, float]] = {
@@ -75,9 +75,11 @@ class ChordLabel:
         return self.bass in self.pcs()
 
     def symbol(self, key: Key) -> str:
-        s = key.pc_name(self.root) + SYMBOL_SUFFIX[self.quality]
+        chromatic = _chromatic_root(self, key)
+        root_name = chromatic[1] if chromatic else key.pc_name(self.root)
+        s = root_name + SYMBOL_SUFFIX[self.quality]
         if self.is_slash:
-            s += "/" + key.pc_name(self.bass)
+            s += "/" + _bass_name(self, key, root_name if chromatic else None)
         return s
 
     def roman(self, key: Key) -> str:
@@ -197,10 +199,60 @@ def _diatonic_triad_is_minor(interval: int, key: Key) -> bool | None:
     return third == 3
 
 
+# Generic interval (letter steps above the root) of each chord tone, for spelling chord tones.
+_GENERIC = {0: 0, 1: 1, 2: 1, 3: 2, 4: 2, 5: 3, 6: 4, 7: 4, 8: 4, 9: 5, 10: 6, 11: 6}
+_NUMERAL_DEGREE = {"I": 0, "II": 1, "III": 2, "IV": 3, "V": 4, "VI": 5, "VII": 6}
+
+
+def _tone_name(root_name: str, quality: str, interval: int) -> str:
+    generic = 6 if quality == "dim7" and interval == 9 else _GENERIC[interval]
+    letter = LETTERS[(LETTERS.index(root_name[0]) + generic) % 7]
+    return _spell(letter, (parse_note_name(root_name) + interval) % 12)
+
+
+def _chromatic_root(label: "ChordLabel", key: Key) -> tuple[str, str] | None:
+    """(numeral, root name) for a chord on the tritone above the tonic; None for every other root.
+
+    The tritone root can read as #IV or bV, and its symbol is spelled to match. The spelling that
+    gives the chord's own tones the fewest accidentals wins (Bb · bV in E minor, not A# with C## and
+    E#; D · bV in G# minor; B · #IV in F minor); on a tie the key's usual spelling decides. Other
+    roots keep the key's spelling and the numeral tables.
+    """
+    if (label.root - key.tonic_pc) % 12 != 6:
+        return None
+    tonic_letter = LETTERS.index(key.tonic[0].upper())
+    best = None
+    for numeral, degree in (("#IV", 3), ("bV", 4)):
+        letter = LETTERS[(tonic_letter + degree) % 7]
+        try:
+            name = _spell(letter, label.root)
+            cost = sum(len(_tone_name(name, label.quality, i)) - 1 for i in QUALITIES[label.quality][0])
+        except ValueError:
+            continue
+        rank = (cost, name != key.pc_name(label.root))
+        if best is None or rank < best[0]:
+            best = (rank, numeral, name)
+    return (best[1], best[2]) if best else None
+
+
+def _bass_name(label: "ChordLabel", key: Key, root_name: str | None) -> str:
+    """A chord tone in the bass is spelled as in the chord when the root is chromatic."""
+    interval = (label.bass - label.root) % 12
+    if root_name and interval in QUALITIES[label.quality][0]:
+        try:
+            return _tone_name(root_name, label.quality, interval)
+        except ValueError:
+            pass
+    return key.pc_name(label.bass)
+
+
 def roman_numeral(label: ChordLabel, key: Key) -> str:
     interval = (label.root - key.tonic_pc) % 12
     q = label.quality
-    if key.mode == "minor" and interval == 11 and q in ("dim", "dim7", "m7b5"):
+    chromatic = _chromatic_root(label, key)
+    if chromatic:
+        numeral = chromatic[0]
+    elif key.mode == "minor" and interval == 11 and q in ("dim", "dim7", "m7b5"):
         numeral = "VII"  # leading-tone chord: vii° / vii°7 / viiø7
     else:
         numeral = (_DEGREES_MAJOR if key.mode == "major" else _DEGREES_MINOR)[interval]
@@ -215,7 +267,7 @@ def roman_numeral(label: ChordLabel, key: Key) -> str:
 
     b = (label.bass - label.root) % 12
     ivs = QUALITIES[q][0]
-    slash = "/" + key.pc_name(label.bass)
+    slash = "/" + _bass_name(label, key, chromatic[1] if chromatic else None)
     mark = _QUALITY_MARK.get(q, "")
     if q in SEVENTH_FAMILY:
         if q in ("m7b5", "dim7"):

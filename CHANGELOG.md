@@ -2,6 +2,32 @@
 
 All notable changes to OrchSketch. Versions follow the milestones in SPEC.md §10.
 
+## v1.1 — Second benchmark (SPEC §8) — 2026-11-12
+
+### Added
+- **Second benchmark: Sam's own 10 progressions** (real Ableton clip exports), in `tests/data/benchmark/`
+  (`B01`…`B10`, B01 also with melody and bass files), each with an expected-labels file Sam confirmed. Kept
+  apart from the 12 textbook files, so the A and v0.4 snapshots and every existing sweep are unchanged.
+- `scripts\benchmark.bat` (`testset.py --benchmark`): builds the 11 ear-test projects in
+  `Documents\OrchSketch\Projects\Benchmark\` and checks SPEC §7's automatic rules
+  (`benchmark_report.txt`). A chord outside the v1 chord list must come out unrecognized and is typed in
+  by hand (`correct_to` in the expected file), as in the app.
+- `tests/test_benchmark.py`: labels (best guess, Roman numeral, unrecognized where expected); A/B/C clean at
+  the default preset and seed 1, with and without files; a `slow` sweep over every preset, section
+  combination, the slider samples and moderate mode.
+- Ear test: all 11 runs × A/B/C 5/5 (`tests/ratings.csv`, tests `B1`–`B10`).
+
+### Fixed
+- **Chords on the tritone** were always named #IV, spelled with the key's sharps (E minor: *A# · #IV*,
+  G# minor: *D · #IV*). They now read #IV or bV, with the root spelled to match, whichever gives the
+  chord's own tones the fewest accidentals; on a tie the key's usual spelling decides. So *Bb · bV* in
+  E minor and *D · bV* in G# minor (benchmark B04, B02), while diminished chords keep *#iv°* and C major
+  keeps *F# · #IV*. Only labels change (other roots are untouched); generated notes are identical.
+
+### Changed
+- `SPEC.md`: the post-v1.0 updates (folder build, bass-file rests, export choice, project name, `slow`
+  marker) are committed with this release.
+
 ## v1.0 — Finish (Milestone 6) — 2026-11-12
 
 ### Added

@@ -1,10 +1,15 @@
-"""SPEC §7-8 full test-set pass (Milestone 6). Run scripts\\test_set.bat.
+r"""SPEC §7-8 full test-set pass (Milestone 6). Run scripts\\test_set.bat.
 
 For each of the 12 textbook progressions (and tests 1, 4 and 11 again with their melody and bass files) this
 drives the real app window off-screen exactly as you would: open the chord file, set the key, Confirm all,
 load the melody/bass files, Generate with the default preset (Full epic) at seed 1, and Save the project.
 The 15 projects land in Documents\\OrchSketch\\Projects\\TestSet\\ for the ear test: open each one in the app
 and listen to A, B and C.
+
+With --benchmark it does the same for the second benchmark (SPEC §8): your own progressions in
+tests\data\benchmark\, saved to Documents\OrchSketch\Projects\Benchmark\, report benchmark_report.txt.
+A chord expected as "unrecognized" must come out unrecognized and is then typed in by hand, as you would
+(its "correct_to" symbol), before Confirm all.
 
 It also checks SPEC §7's automatic pass/fail rules and writes testset_report.txt:
   * every chord's expected label is the best guess or among the alternatives,
@@ -27,12 +32,15 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 DATA = ROOT / "tests" / "data"
 TESTSET = Path.home() / "Documents" / "OrchSketch" / "Projects" / "TestSet"
 REPORT = ROOT / "testset_report.txt"
+BENCHMARK_DATA = DATA / "benchmark"
+BENCHMARK = Path.home() / "Documents" / "OrchSketch" / "Projects" / "Benchmark"
+BENCHMARK_REPORT = ROOT / "benchmark_report.txt"
 _APP = None  # the off-screen QApplication
 
 
-def runs() -> list[tuple[Path, bool]]:
+def runs(data: Path = DATA) -> list[tuple[Path, bool]]:
     out = []
-    for exp in sorted(DATA.glob("*.expected.json")):
+    for exp in sorted(data.glob("*.expected.json")):
         out.append((exp, False))
         if json.loads(exp.read_text(encoding="utf-8")).get("melody_file"):
             out.append((exp, True))
@@ -44,6 +52,7 @@ def project_stem(exp_path: Path, with_files: bool) -> str:
 
 
 def run_one(exp_path: Path, with_files: bool, folder: Path) -> tuple[bool, list[str]]:
+    data = exp_path.parent
     from PySide6.QtCore import QSettings
 
     from orchsketch import project as pj
@@ -55,7 +64,7 @@ def run_one(exp_path: Path, with_files: bool, folder: Path) -> tuple[bool, list[
 
     exp = json.loads(exp_path.read_text(encoding="utf-8"))
     stem = project_stem(exp_path, with_files)
-    lines = [f"Test {exp['test']:>2}{' + melody and bass files' if with_files else ''}  ({exp['file']}, "
+    lines = [f"Test {str(exp['test']):>2}{' + melody and bass files' if with_files else ''}  ({exp['file']}, "
              f"{exp['key']['tonic']} {exp['key']['mode']}, {exp['bars']} bars)"]
     ok = True
     notes: list = []
@@ -70,27 +79,35 @@ def run_one(exp_path: Path, with_files: bool, folder: Path) -> tuple[bool, list[
     w.projects_root = folder
     try:
         w.set_key(exp["key"]["tonic"], exp["key"]["mode"])
-        assert w.load(DATA / exp["file"]), "the chord file was rejected"
+        assert w.load(data / exp["file"]), "the chord file was rejected"
         key = w.key()
         # labels: best guess, or the expected label among the alternatives (SPEC §7)
         res = w.session.chord_results
         bad = []
         best = 0
-        for r, e in zip(res, exp["chords"]):
+        typed = []
+        for i, (r, e) in enumerate(zip(res, exp["chords"])):
             got = r.label.symbol(key) if r.label else "unrecognized"
             if got == e["label"]:
                 best += 1
             elif e["label"] not in [a.symbol(key) for a in r.alternatives]:
                 bad.append(f"{e['label']} read as {got}")
+            if e.get("correct_to"):  # outside the v1 chord list: set by hand, as you would
+                typed.append((i, e["correct_to"]))
         if len(res) != len(exp["chords"]):
             bad.append(f"{len(res)} chords found, {len(exp['chords'])} expected")
         ok &= not bad
         lines.append(f"  Labels: {best}/{len(exp['chords'])} best guess" + (f"  FAIL: {'; '.join(bad)}" if bad else
                                                                              "  (all correct)"))
+        for i, text in typed:
+            err = w.type_chord(i, text)
+            assert err is None, f"chord {i + 1}: {err}"
+        if typed:
+            lines.append("  Set by hand: " + ", ".join(f"chord {i + 1} = {t}" for i, t in typed))
         w.confirm_all()
         if with_files:
-            assert w.load_part_file("melody", DATA / exp["melody_file"])
-            assert w.load_part_file("bass", DATA / exp["bass_file"])
+            assert w.load_part_file("melody", data / exp["melody_file"])
+            assert w.load_part_file("bass", data / exp["bass_file"])
         w.generate()
         insts, rl = instruments(), rules()
         for i, alt in enumerate("ABC"):
@@ -135,17 +152,19 @@ def run_one(exp_path: Path, with_files: bool, folder: Path) -> tuple[bool, list[
     return ok, lines
 
 
-def main(only: list[str] | None = None, folder: Path = TESTSET, report: Path | None = REPORT) -> bool:
+def main(only: list[str] | None = None, folder: Path = TESTSET, report: Path | None = REPORT,
+         data: Path = DATA) -> bool:
     from PySide6.QtWidgets import QApplication
 
     from orchsketch import __version__
     global _APP
     _APP = QApplication.instance() or QApplication([])
     folder.mkdir(parents=True, exist_ok=True)
-    out = [f"OrchSketch v{__version__} - full test-set pass (SPEC §7-8)   {datetime.now():%Y-%m-%d %H:%M}",
+    title = "second benchmark, your progressions" if data == BENCHMARK_DATA else "full test-set pass"
+    out = [f"OrchSketch v{__version__} - {title} (SPEC §7-8)   {datetime.now():%Y-%m-%d %H:%M}",
            "Default preset (Full epic), safe mode, seed 1. Projects: " + str(folder), ""]
     total = passed = 0
-    for exp, files in runs():
+    for exp, files in runs(data):
         if only and project_stem(exp, files) not in only:
             continue
         ok, lines = run_one(exp, files, folder)
@@ -161,4 +180,10 @@ def main(only: list[str] | None = None, folder: Path = TESTSET, report: Path | N
 
 
 if __name__ == "__main__":
-    sys.exit(0 if main(sys.argv[1:] or None) else 1)
+    args = sys.argv[1:]
+    if "--benchmark" in args:
+        args.remove("--benchmark")
+        ok = main(args or None, folder=BENCHMARK, report=BENCHMARK_REPORT, data=BENCHMARK_DATA)
+    else:
+        ok = main(args or None)
+    sys.exit(0 if ok else 1)

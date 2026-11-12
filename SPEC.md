@@ -1,6 +1,6 @@
 # Orchestral Composition Assistant — v1 Build Spec
 
-Nov 11, 2026 · @Sam
+Nov 12, 2026 · @Sam · updated after v1.0
 
 V1 is a standalone Windows app. It takes a block-chord MIDI file, labels the harmony, and generates 3 orchestrations for strings, brass, woodwinds and choir that stay in range and are rule-checked. You audition them with a light SoundFont and export them as MIDI to drag into Ableton. It is for personal use only. Accuracy beats novelty in v1.
 
@@ -11,7 +11,7 @@ V1 is a standalone Windows app. It takes a block-chord MIDI file, labels the har
 | Decision | V1 choice | Replaces in original overview |
 | --- | --- | --- |
 | Platform | Windows only, Sam's existing PC | — |
-| Form | Standalone desktop app. No VST3, no Max for Live | C++/JUCE VST3 |
+| Form | Standalone desktop app, packaged as a folder app (`OrchSketch.exe`, zipped for download). No VST3, no Max for Live | C++/JUCE VST3 |
 | Input | MIDI file dragged or opened into the app | Clip capture or import |
 | Output | MIDI files: one per instrument, one multi-track file, or both. Drag into Ableton or save to a folder | MIDI export |
 | Ableton integration | None beyond drag-and-drop. Does not create tracks. Arrangement view use | Live track creation |
@@ -108,8 +108,8 @@ Generation works in three steps: assign roles, build candidate voicings that pas
 **Pipeline**
 
 1. **Roles.** Each active part gets one role for the passage: bass, low harmony, mid harmony, high harmony, melody, or pad. The preset sets the defaults. In v1 the only override is which instrument plays the melody; full per-part role overrides and roles in presets come later.
-2. **Bass line.** If you supply a bass file, every part on the bass line doubles it in octaves, with the file's own rhythm: cellos at the bass register; basses, tuba and contrabassoon an octave lower where their range allows; bass trombone on the lower octave when it fits; bassoon 2 too. A note below an instrument's range moves up an octave, and a part that can't play the line in any octave rests. The choir bass sings the line as well, unless that would need a leap over an octave (then it keeps the chord's bass note). Without a bass file the bass parts follow the chord's bass note (the root, or the slash bass). A per-project toggle switches to an independent line that moves by step toward the next chord's bass: at most two diatonic passing notes, on chords of a half note or longer. This toggle is moderate mode only: it needs Character at Moderate for the sections playing the bass, and no bass file.
-3. **Melody.** If you supply a melody file, it goes to one instrument chosen by register, with its own order per alternative: A tries the horns first, B Violins I, C the flute, each with fallbacks (at pitch first, then an octave away). You can also pick the instrument. The melody replaces that instrument's top line; its other players stay on harmony. With keep-as-is the melody stays out of the strings. Melody notes are fixed, and the harmony is voiced around them (kept below the melody where it can be). Octave doubling: Auto, Off, Octave up or Octave down. Auto doubles at Density 4–5 (A an octave down, B and C up); an octave-down doubling stays at G3 or above. If a melody plan can't be voiced, the next one is tried: the same instrument without the doubling, then the next instrument.
+2. **Bass line.** If you supply a bass file, every part on the bass line doubles it in octaves, with the file's own rhythm: cellos at the bass register; basses, tuba and contrabassoon an octave lower where their range allows; bass trombone on the lower octave when it fits; bassoon 2 too. Basses, tuba and contrabassoon, doubling an octave below, rest on the notes they can't reach there, so they keep the line's shape. Other bass lines move such a note by an octave. A part that can't play the line in any octave rests. The choir bass sings the line as well, unless that would need a leap over an octave (then it keeps the chord's bass note). Without a bass file the bass parts follow the chord's bass note (the root, or the slash bass). A per-project toggle switches to an independent line that moves by step toward the next chord's bass: at most two diatonic passing notes, on chords of a half note or longer. This toggle is moderate mode only: it needs Character at Moderate for the sections playing the bass, and no bass file.
+3. **Melody.** If you supply a melody file, it goes to one instrument chosen by register, with its own order per alternative: A tries the horns first, B Violins I, C the flute, each with fallbacks (at pitch first, then an octave away). You can also pick the instrument. The melody replaces that instrument's top line; its other players stay on harmony. With keep-as-is the melody stays out of the strings. Melody notes are fixed, and the harmony is voiced around them (kept below the melody where it can be). Octave doubling: Auto, Off, Octave up or Octave down. Auto doubles at Density 4–5 (A an octave down, B and C up); an octave-down doubling stays at G3 or above. If a melody plan can't be voiced, the next one is tried: the same instrument without the doubling, then the next instrument. A melody given to a choir voice counts as a choir voice for the choir rules. In Safe mode the rest of the choir may not fit around it, usually because the choir bass can't go low enough; the app then says so and suggests Character: Moderate, another instrument or Melody: auto.
 4. **Voicing.** For each chord, candidate pitch sets are built inside each part's range. They are ranked by voice leading from the previous chord, spacing, doubling and slider weights.
 5. **Pattern.** The chosen rhythm pattern is applied per part (section 5c).
 6. **Check.** The rule checker runs (section 7). Any hard-rule failure discards the candidate. It is never shown and then flagged.
@@ -183,7 +183,7 @@ Four sliders, set per section (woodwinds, brass, strings, choir) with a global m
 2. **Chord strip:** one cell per chord showing symbol, Roman numeral and length. Click it to correct.
 3. **Grid:** one row per active part, one column per chord. Each cell shows the part's notes (Ableton names). Yellow means outside comfortable range, red means a rule error (should never appear). Each row has lock, mute, solo and a drag handle for export.
 4. **Side panel:** per-section sliders and pattern pickers.
-5. **Piano-roll preview:** opens under the grid for the selected part and shows its full line.
+5. **Piano-roll preview:** opens under the grid for the selected part and shows its full line, with each note's name (Ableton or scientific, as set).
 6. **Bottom:** the transport (play, stop, loop, tempo), the checker summary with warnings, and the one-line reason for the current alternative.
 
 The interface uses a dark theme.
@@ -200,17 +200,19 @@ Export writes standard MIDI files at concert pitch, starting at bar 1 with no le
 
 **Export**
 
-- **Per-part files:** one track per file, named `{ProjectName}_{Part}_{Alt}.mid`, e.g. `NightRise_Horns1-4_A.mid`.
+- **Export choice:** per-part files, the full score file, or both (default both). It also sets what the "All" drag handle gives.
+- **Per-part files:** one track per file, named `{ProjectName}_{Part}_{Alt}.mid`, e.g. `NightRise_Hn1_A.mid` … `NightRise_Hn4_A.mid`.
 - **Full score file:** type 1 MIDI with one named track per part, `{ProjectName}_Full_{Alt}.mid`.
 - **Drag-out:** drag a row handle (or the "All" handle) straight into Ableton's Arrangement view.
 - **Save to folder:** export everything to `Documents\OrchSketch\Exports\{ProjectName}\`.
-- Divisi exports as one file per divisi line (e.g. `Vln1-a`, `Vln1-b`), plus an optional combined file.
+- Divisi exports as one file per divisi line (e.g. `Vln1-a`, `Vln1-b`). The optional combined files hold all of an instrument's lines on one track for every instrument playing on several lines (divisi, a2 winds, horns 1–4), named `{ProjectName}_{Code}-all_{Alt}.mid`, e.g. `NightRise_Hn-all_A.mid`. Unisons between its lines are merged so no two notes overlap on one pitch.
 - Tempo and time signature are written into each file. The constant CC1 value is written at the start of each part. Keyswitches and CC1/CC11 curves are left out in v1, and the export is designed so they can be added later.
 
 **Projects**
 
 - Saved as a JSON `.osk` file in `Documents\OrchSketch\Projects\`. It holds the input files (embedded copies), key, tempo, chord corrections, settings, locks, chosen alternatives, the generated notes themselves, and the generation seed.
 - Reopening a project restores the saved notes exactly, even after app updates change the generator. The seed is only used when you choose to regenerate.
+- The project name is the `.osk` file's name (the chord clip's name until first saved) and is used in export file names. Undo history isn't saved; it lasts while the app is open.
 
 **Rule checker** runs after every generation and on demand. Results are listed per part and per chord, and clicking a warning highlights the cell. Problems that come only from your own inputs (kept voicing, locked parts, melody and bass files) are shown on the cells, not discarded; everything the generator adds must pass.
 
@@ -258,7 +260,7 @@ Each test is run with melody and bass files absent and present (tests 1, 4 and 1
 
 ## 9. Tech stack and architecture
 
-The app is built in Python 3.12 with a Qt (PySide6) interface and packaged as one Windows `.exe`. Analysis, generation and checking are pure-Python modules with no UI code. They are covered by automated tests that run without the app open.
+The app is built in Python 3.12 with a Qt (PySide6) interface and packaged as a Windows folder app (`OrchSketch.exe` plus its files, zipped as one download; it starts in 1–2 s, where a single-file `.exe` takes 5–10 s). Analysis, generation and checking are pure-Python modules with no UI code. They are covered by automated tests that run without the app open.
 
 | Module | Job | Library |
 | --- | --- | --- |
@@ -275,6 +277,7 @@ The app is built in Python 3.12 with a Qt (PySide6) interface and packaged as on
 | ui | Grid, sliders, transport | PySide6 |
 
 - Tests run with pytest. Every milestone must pass the existing tests before it is tagged.
+- The biggest generator sweeps carry a `slow` marker: `run_tests.bat` skips them for a quicker run, and `release.bat` runs everything before tagging.
 - Generation is seeded, so results can be reproduced and bugs can be reported exactly.
 
 ## 10. Milestones (v1)
@@ -286,7 +289,7 @@ Each milestone ends with a working build, a version tag, a changelog entry, a Gi
 3. **v0.3 — First orchestration.** Safe-mode voicings, the grid, playback with the SoundFont, per-part export.
 4. **v0.4 — Control.** 3 alternatives (A/B/C approaches), lock and regenerate, per-chord swap with neighbour re-check, undo/redo, top-voice option, keep-as-is, global sliders, presets.
 5. **v0.5 — Motion.** Rhythm patterns, bass doubling and the independent toggle, melody assignment, moderate mode, per-section sliders.
-6. **v1.0 — Finish.** Projects, full export options, packaged `.exe`, full test-set pass, and the Ableton check.
+6. **v1.0 — Finish.** Projects, full export options, packaged app (folder build), full test-set pass, and the Ableton check.
 
 ## 11. Out of scope for v1
 
@@ -296,9 +299,9 @@ The following are left out: the AI assistant; keyswitches and CC1/CC11 curves (t
 
 ## 12. Open items
 
-- **Building the `.exe`:** it has to be built on Windows. This could be a one-click `build.bat` you run, or Claude can build it directly if this chat is linked to your PC. To decide before Milestone 1.
-- **SoundFont:** confirm the GeneralUser GS licence and sound quality in Milestone 3.
-- **Range and low-interval tables:** cross-check against an orchestration reference in Milestone 2.
+- ~~**Building the `.exe`**~~ resolved: `scripts\build_exe.bat`, a one-click build Sam runs (v1.0).
+- ~~**SoundFont**~~ resolved: GeneralUser GS v2.0.3, licence and sound confirmed in Milestone 3.
+- ~~**Range and low-interval tables**~~ resolved: cross-checked in Milestone 2 (sources and changes in STATUS.md).
 - **Your progressions:** collect 5–10 for the second benchmark after the v1.0 test-set pass.
 - **App name:** OrchSketch is a placeholder.
 

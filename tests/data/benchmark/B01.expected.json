@@ -1,0 +1,62 @@
+{
+  "test": "B1",
+  "file": "B01.mid",
+  "key": {
+    "tonic": "F",
+    "mode": "minor"
+  },
+  "bars": 8,
+  "intended": "Fm7 - G#maj7 - Ebadd9 - Bbm7 (x2)",
+  "chords": [
+    {
+      "start_beat": 0.0,
+      "beats": 4.0,
+      "label": "Fm7",
+      "roman": "i7"
+    },
+    {
+      "start_beat": 4.0,
+      "beats": 4.0,
+      "label": "Abmaj7",
+      "roman": "IIImaj7"
+    },
+    {
+      "start_beat": 8.0,
+      "beats": 4.0,
+      "label": "Ebadd9/G",
+      "roman": "VIIadd9/G"
+    },
+    {
+      "start_beat": 12.0,
+      "beats": 4.0,
+      "label": "Bbm7",
+      "roman": "iv7"
+    },
+    {
+      "start_beat": 16.0,
+      "beats": 4.0,
+      "label": "Fm7",
+      "roman": "i7"
+    },
+    {
+      "start_beat": 20.0,
+      "beats": 4.0,
+      "label": "Abmaj7",
+      "roman": "IIImaj7"
+    },
+    {
+      "start_beat": 24.0,
+      "beats": 4.0,
+      "label": "Ebadd9/G",
+      "roman": "VIIadd9/G"
+    },
+    {
+      "start_beat": 28.0,
+      "beats": 4.0,
+      "label": "Bbm7",
+      "roman": "iv7"
+    }
+  ],
+  "melody_file": "B01.melody.mid",
+  "bass_file": "B01.bass.mid"
+}

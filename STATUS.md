@@ -4,11 +4,12 @@
 > The chat that finishes a milestone updates this file before it ends.
 
 ## Current state
-- **Version:** v1.0
-- **Last milestone completed:** 6 — Finish. **v1 is complete** (SPEC §7 pass/fail: pass, see below).
-- **Next:** your own 5–10 progressions as the second benchmark (SPEC §8, §12), then Phase 2 (SPEC §11).
+- **Version:** v1.1
+- **Last milestone completed:** 6 — Finish (v1.0), plus the **second benchmark (v1.1): pass** — Sam's 10
+  progressions, see below.
+- **Next:** Phase 2 (SPEC §11), Sam to choose the first items.
 - **Repo:** https://github.com/shenry42/orchsketch
-- **Last updated:** 2026-11-12 (Milestone 6)
+- **Last updated:** 2026-11-12 (v1.1, second benchmark)
 
 ## Milestones
 - [x] 1 — v0.1 Read and label (+ packaging spike, audio test with Ableton open)
@@ -17,9 +18,23 @@
 - [x] 4 — v0.4 Control (A/B/C alternatives, lock, swap, undo, global sliders, presets)
 - [x] 5 — v0.5 Motion (patterns, bass, melody, moderate mode, per-section sliders)
 - [x] 6 — v1.0 Finish (projects, full export, .exe, full test-set pass, Ableton check)
+- [x] v1.1 — Second benchmark (SPEC §8): Sam's 10 progressions
 
 ## Test results (latest run)
-- Automated tests: 0 failed. Claude's workspace: 421 passed, 1 skipped in 7:20 (music21 not installed
+- Automated tests (v1.1): 0 failed. Claude's workspace: 461 passed, 1 skipped in 10:24 (music21 not installed
+  there), slow sweeps included. `release.bat` runs all of them on Windows before tagging (`test_results.txt`).
+- **Second benchmark (SPEC §8, v1.1): PASS.** Sam's 10 progressions (Ableton exports, 4 bars each, B01 8 bars
+  with melody and bass files), `scripts\benchmark.bat` (Full epic, safe, seed 1):
+  - Labels: 40/40 chords as Sam intended (Sam confirmed 2026-11-12). B08's four chords have 9ths, 11ths, 6ths
+    and a #11, outside the v1 chord list: they come out unrecognized (correct per SPEC §3) and are typed in by
+    hand as Cm, Abm, Cm, Db. One fix was needed: tritone chords (B02 D · bV, B04 Bb · bV), see Decisions.
+  - `benchmark_report.txt` on Windows: 11/11 runs pass (0 generator errors, 0 must-pass warnings, nothing
+    outside playable range, projects reopen exactly).
+  - Ear test (`tests/ratings.csv`, tests B1–B10): all 11 runs × A/B/C 5/5.
+  - B01 + files: about 80–120 warnings per alternative, all "melody clashes a minor 2nd" — Sam's melody uses
+    D, G and A natural over F-minor chords (Sam: intended). Warnings only; rated 5/5.
+- v1.0 test results follow.
+- Automated tests (v1.0): 0 failed. Claude's workspace: 421 passed, 1 skipped in 7:20 (music21 not installed
   there). Windows `run_tests.bat` (skips the 66 `slow` sweeps): 367 passed, 66 deselected in 7:07. `release.bat` runs all of them.
 - **V1 pass/fail (SPEC §7): PASS.**
   - Labels: 12/12 files, every chord the best guess.
@@ -133,7 +148,20 @@
   - Sam's v1.0 requests: choosing which instrument plays a pedal tone (test 9); an "override" to keep a melody
     in the choir when the rest of the choir can't sing around it. Hard choir rules are never broken by
     generated parts (SPEC §5a), so this needs a spec decision, e.g. letting the choir bass rest there.
-- Sam's real Ableton export isn't in the automated tests yet (the round trip was checked by hand). Add one Ableton-exported `.mid` to `tests/data/ableton/` when convenient.
+- Ableton exports are now in the automated tests: the 10 benchmark files in `tests/data/benchmark/` are
+  Sam's own clip exports (96 PPQ, type 0). The round trip into Ableton was checked by hand (v1.0).
+- Benchmark files: Sam's originals sit in `benchmark/` (local, git-ignored); the copies the tests use are in
+  `tests/data/benchmark/` as `Bnn.mid`, `Bnn.melody.mid`, `Bnn.bass.mid` plus `Bnn.expected.json` ("test":
+  "Bn", "intended", per chord label/roman, or "unrecognized" + "correct_to"). New benchmark progressions:
+  add them there, `tests/test_benchmark.py::test_ten_progressions_present` lists the expected names.
+- Grid and piano-roll note names still use the key's spelling, so in B04 (E minor) the Bb · bV chord's
+  notes show as A#. Phase 2: spell a chord's notes like its symbol.
+- Chromatic roots other than the tritone keep the key's spelling table, which can disagree with the Roman
+  numeral in sharp keys (D major: an Eb chord shows as *D# · bII*). Not in the benchmark; Phase 2 with the
+  note-name item above.
+- **Phase 2 ideas from the benchmark:** a larger chord vocabulary (m11, add11, m6/9, 6/9#11 — all of B08);
+  the B01 melody against its chords suggests an optional check or hint when a melody file sits outside the
+  key or chords (today: clash warnings only).
 - `Documents\OrchSketch` is both the Git repo and where the app writes `Exports\`, `Projects\` and `logs\` (git-ignored). Still worth moving the repo to its own folder (e.g. `Documents\OrchSketch-dev`); the app's folders stay where they are.
 - Bass file: basses, tuba and contrabassoon rest on file notes they can't reach an octave down (v1.0, Sam's
   choice), so in a low line (test 11 reaches C2) they drop out on a few notes; cellos, bass trombone and
@@ -289,12 +317,20 @@
   - *Full score:* track 1 holds the name, 4/4 and tempo; then one track per sounding part in score order,
     named by the part's label.
   - *Test-set projects* are saved by the real window (driven off-screen), so they are exactly what the app saves.
+- **v1.1 decisions (Claude's calls, Sam agreed):**
+  - *Tritone chords:* a chord whose root is a tritone above the tonic reads #IV or bV, the root spelled to
+    match (`analysis/chords.py`, `_chromatic_root`): fewest accidentals in the chord's own tones wins, a tie
+    keeps the key's usual spelling (C major F# · #IV, C minor Gb · bV). A chord tone in the bass is spelled
+    with the chord (Bb/D · bV6). Every other root is unchanged; generator output is unchanged.
+  - *Benchmark out-of-vocabulary chords* stay in the benchmark as "unrecognized" + typed correction, which
+    also covers the hand-correction path end to end.
+  - *Roman numerals in minor* stay natural-minor degrees (III, VII), as in test 1; Sam writes bIII/bVII.
+  - Slash labels follow the lowest note of the clip (B01 Ebadd9/G, B02 A/C#, B04 F/A, B07 Eb/Bb), as SPEC §3.
 - **Line ending note:** `.bat` files must be CRLF (the build/test scripts check it).
 
 ## Notes for the next chat
-- v1 is done. Next steps (Sam to choose):
-  - Run Sam's own 5–10 progressions as the second benchmark (SPEC §8): add each as a test file with expected
-    labels, then build projects with `scripts/testset.py`-style runs.
+- v1.1 is done (second benchmark passed). Next steps (Sam to choose):
+  - Benchmark re-run after any change: `scripts\benchmark.bat` (builds `Projects\Benchmark\`).
   - Phase 2 (SPEC §11): countermelodies, more and richer patterns (ideas under Known issues), keyswitches,
     CC1/CC11 curves; requests: pedal-tone instrument choice, per-part role overrides.
   - Housekeeping: move the repo out of `Documents\OrchSketch`.
