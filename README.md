@@ -28,7 +28,11 @@ src/orchsketch/
   instruments.py    instrument records (ranges, roles, GM program, timbre notes) from data/instruments/*.json
   rules.py          low-interval limits, spacing/leap limits, check severities from data/rules.json
   checker.py        rule checker on plain note lists (SPEC §7), no UI
-  generator.py      orchestration: voices, candidate voicings, seeded voice-leading search, checker gate
+  generator.py      orchestration: approaches A/B/C, voices, candidate voicings, seeded voice-leading search,
+                    checker gate, keep-as-is, follow-input top voice, Forces/Density/Dynamics
+  edits.py          lock + regenerate, regenerate one part / one chord, per-chord swap with leap flags
+  history.py        undo/redo snapshots
+  presets.py        ensemble presets (data/presets.json) and your own (Documents\OrchSketch\Presets)
   export.py         per-part MIDI export ({Project}_{Part}_{Alt}.mid)
   data/             the JSON data files (edit these to change a range or a limit)
   playback/         FluidSynth setup, audition player (loop, tempo, mute/solo)

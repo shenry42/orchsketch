@@ -6,6 +6,7 @@ Ableton names middle C "C3", i.e. one octave lower in the label.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 
 LETTERS = "CDEFGAB"
 LETTER_PC = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
@@ -105,6 +106,9 @@ class Key:
 
     def name_table(self) -> list[str]:
         """Name for each pitch class 0..11 in this key."""
+        return list(_name_table(self))
+
+    def _build_name_table(self) -> tuple[str, ...]:
         scale = self.spelled_scale()
         if any("b" in n for n in scale):
             table = list(_FLATS)
@@ -117,13 +121,18 @@ class Key:
         if self.mode == "minor":  # leading tone, spelled as the raised 7th degree
             lt_letter = scale[6][0]
             table[(self.tonic_pc + 11) % 12] = _spell(lt_letter, (self.tonic_pc + 11) % 12)
-        return table
+        return tuple(table)
 
     def pc_name(self, pc: int) -> str:
-        return self.name_table()[pc % 12]
+        return _name_table(self)[pc % 12]
 
     def label(self) -> str:
         return f"{self.tonic} {self.mode}"
+
+
+@lru_cache(maxsize=64)
+def _name_table(key: Key) -> tuple[str, ...]:
+    return key._build_name_table()
 
 
 def note_name(pitch: int, style: str = "ableton", key: Key | None = None) -> str:

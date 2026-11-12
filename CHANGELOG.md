@@ -2,6 +2,66 @@
 
 All notable changes to OrchSketch. Versions follow the milestones in SPEC.md §10.
 
+## v0.4 — Control (Milestone 4) — 2026-11-11
+
+### Added
+- **Three alternatives** (tabs A / B / C, Ctrl+1/2/3), each with its own one-line reason. Generate builds all
+  three from the seed in the background, so the window stays responsive (about 2 s for 16 bars).
+  - A, low and warm: unchanged. It gives exactly the v0.3 notes at the default settings
+    (`tests/data/a_v03_snapshot.json`).
+  - B, wide and full: the widest span. Violins I in octaves on top, flutes and piccolo an octave up, horns in
+    the middle, basses, tuba and contrabassoon an octave down, open 5ths in the low brass.
+  - C, high and bright: higher upper voices led by violins, flutes, piccolo, oboes and trumpets 1–3, horns in
+    the middle, and a light bass (no tuba, contrabassoon or open 5ths).
+- **Lock and regenerate**:
+  - An L button on every row; locks are per alternative.
+  - *Regenerate unlocked* (Ctrl+R) makes a new variation that is pushed away from the current one. Locked
+    parts keep their notes exactly, and Generate keeps them too.
+  - Right-click a part for *Regenerate this part only*. It gets its own new line with the same rhythm and
+    never changes the chord's bass note.
+  - Click a chord header for *Regenerate this chord*.
+- **Per-chord and per-bar swap**: from the chord header, *Use B's / C's voicing for this chord / this bar*,
+  and *back to own*. The header shows the source ("Am · B"). The checker re-runs on the result, and leaps
+  the swap made bigger (8+ semitones) are flagged as the new `swap_leap` warning on the neighbouring chords.
+  Your edits are kept even when they break a rule: the cells turn red or orange, and the reason is in the
+  tooltip and the details panel.
+- **Undo/redo** (Ctrl+Z / Ctrl+Y, plus buttons) for every edit: corrections, the key, presets and parts,
+  sliders, top voice, keep-as-is, seed, locks, swaps, Generate and every regeneration.
+- **Top voice**: *smooth* (as before) or *follow input*, where the top voice takes your clip's top note in
+  the nearest octave the approach allows, falling back to smooth where it can't.
+- **Keep-as-is**: *Keep my voicing (strings)* keeps your input voicing exactly as written, spread over the
+  string lines low to high (Basses / Cellos / Violas / Violins II / Violins I, divisi as needed, one file per
+  line). Everything else is orchestrated around it, and model parts that double your bass are linked to it.
+- **Global sliders**:
+  - Character is shown locked at Safe until Milestone 5.
+  - Forces: Solo (one player per instrument, solo strings auditioned with GM solo sounds), Section, or
+    Divisi (Violins II, violas and cellos split).
+  - Density 1–5: the most important lines per voice, each section kept without gaps, the choir all or
+    nothing.
+  - Dynamics pp–ff: velocity and CC1 30/50/65/80/100/120. It applies at once; Forces and Density take
+    effect at the next Generate, and the button turns orange.
+- **Presets** (`data/presets.json`), replacing the section checkboxes: Strings only, Strings + horns,
+  Brass + choir, Full epic, Woodwinds + strings (soft), Low and heavy. *Parts…* turns single instruments on
+  or off; *Save preset…* writes your own to `Documents\OrchSketch\Presets\`.
+- Exports are named after the tab: `{clip}_{Part}_A/B/C.mid`.
+- New modules: `edits.py` (lock/regenerate/swap, pure), `history.py` (undo), `presets.py`.
+- Tests:
+  - B and C on all 12 files × seeds 1–3 × all 15 section combinations, with zero issues.
+  - Every preset × A/B/C, and Forces × Density samples.
+  - Follow input and keep-as-is on every file.
+  - Edits, undo, presets, and the new window features off-screen, including background Generate.
+  - 322 tests in total.
+
+### Changed
+- Generator refactor: one master line list, and approaches as data (voices, octaves, targets, lead
+  order). Doubling links are rebuilt from the notes: a line doubles another where it plays the same voice
+  on the same pitch class.
+- Checker: parts can carry per-chord links (`Part.doubles_at`), so a swapped chord no longer makes every
+  doubling in the piece count as independent parallels.
+- Speed: the voice-leading search uses lookup tables, a one-chord fast path builds the checker parts, and
+  key name tables are cached. One alternative on 16 bars went from 1.9 s to about 0.6 s.
+- The test run takes about 3 minutes (was 1:40) because of the larger sweeps.
+
 ## v0.3 — First orchestration (Milestone 3) — 2026-11-11
 
 ### Added

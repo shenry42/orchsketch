@@ -13,6 +13,9 @@ Output
 Two parts are *linked* (not independent) when one doubles the other (`Part.doubles`, followed
 through chains) or when they share a `Part.group` (e.g. low brass in open-5th power chords).
 Linked parts may move in parallel 5ths/8ves and don't count as doubling each other.
+Parts may also say whom they double chord by chord (`Part.doubles_at`, e.g. after a per-chord swap):
+then two parts are linked at a chord when they are linked there, and between two chords when they are
+linked at both.
 """
 from __future__ import annotations
 
@@ -36,6 +39,7 @@ class Part:
     doubles: str | None = None  # id of the part this part doubles at the unison/octave
     group: str | None = None  # parts with the same group move together on purpose
     name: str = ""  # display name; defaults to the instrument name
+    doubles_at: tuple[str | None, ...] | None = None  # optional: the part it doubles at each chord
 
     def __post_init__(self):
         object.__setattr__(self, "notes", tuple(sorted(self.notes, key=lambda n: (n.start, -n.pitch))))
@@ -146,16 +150,19 @@ def _seventh_pcs(label: ChordLabel) -> set[int]:
 
 
 class _Links:
-    """Union-find over part ids: doubling chains and shared groups."""
+    """Union-find over part ids: doubling chains and shared groups (at one chord when `chord` is given)."""
 
-    def __init__(self, parts: list[Part]):
+    def __init__(self, parts: list[Part], chord: int | None = None):
         self.parent = {p.id: p.id for p in parts}
         by_group: dict[str, str] = {}
         for p in parts:
-            if p.doubles is not None:
-                if p.doubles not in self.parent:
-                    raise ValueError(f"part {p.id} doubles unknown part {p.doubles!r}")
-                self._union(p.id, p.doubles)
+            target = p.doubles
+            if chord is not None:
+                target = p.doubles_at[chord] if p.doubles_at is not None and chord < len(p.doubles_at) else None
+            if target is not None:
+                if target not in self.parent:
+                    raise ValueError(f"part {p.id} doubles unknown part {target!r}")
+                self._union(p.id, target)
             if p.group:
                 if p.group in by_group:
                     self._union(p.id, by_group[p.group])
@@ -192,8 +199,23 @@ class _Checker:
         self.inst: dict[str, Instrument] = insts
         self.style = style
         self.links = _Links(self.parts)
+        self._local = any(p.doubles_at is not None for p in self.parts)
+        self._links_at: dict[int, _Links] = {}
         self.issues: list[Issue] = []
         self._seen: set = set()
+
+    def linked_at(self, a: str, b: str, *chords: int) -> bool:
+        """Linked for the whole passage, or (with per-chord links) at every one of these chords."""
+        if self.links.linked(a, b):
+            return True
+        if not self._local:
+            return False
+        for c in chords:
+            if c not in self._links_at:
+                self._links_at[c] = _Links(self.parts, c)
+            if not self._links_at[c].linked(a, b):
+                return False
+        return True
 
     # --- naming / bookkeeping
     def pname(self, pid: str) -> str:
@@ -386,7 +408,7 @@ class _Checker:
                     both_choir = all(self.inst[self.by_id[q].instrument].section == "choir" for q in (pa, pb))
                     if both_choir:
                         check = "choir_parallels"
-                    elif self.links.linked(pa, pb):
+                    elif self.linked_at(pa, pb, i, i + 1):
                         continue
                     else:
                         check = "parallels"
@@ -415,7 +437,7 @@ class _Checker:
                 outer_parts = [p for p, pitch in sounding if pitch == outer]
                 doubling = [(p, pitch) for p, pitch in sounding
                             if pitch % 12 == outer % 12
-                            and not any(p.id == q.id or self.links.linked(p.id, q.id) for q in outer_parts)]
+                            and not any(p.id == q.id or self.linked_at(p.id, q.id, i) for q in outer_parts)]
                 if doubling:
                     ps = sorted({p.id for p in outer_parts} | {p.id for p, _ in doubling})
                     self.add("doubled_outer",

@@ -1,56 +1,109 @@
-"""Main window: load a chord clip, review/correct labels, generate, audition and export.
+"""Main window: load a chord clip, review/correct labels, generate, compare, edit, audition and export.
 
-Milestone 3 adds section toggles, Generate, the part grid, the piano-roll preview, playback and per-part
-export. Later milestones add alternatives, locks, sliders and presets.
+Milestone 4 adds the three alternatives (tabs A/B/C, each with its one-line reason), locks and
+regeneration (unlocked parts, one part, one chord), per-chord and per-bar swaps with a neighbour re-check,
+undo/redo for every edit, the top-voice option, keep-as-is, the global sliders and presets.
+Generation of the three alternatives runs in the background so the window stays responsive.
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, QSettings, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QActionGroup, QCursor, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QFileDialog, QHBoxLayout, QInputDialog, QLabel, QMainWindow, QMenu,
-    QMessageBox, QPushButton, QSpinBox, QSplitter, QTextEdit, QToolButton, QVBoxLayout, QWidget,
+    QApplication, QCheckBox, QComboBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QInputDialog, QLabel,
+    QMainWindow, QMenu, QMessageBox, QPushButton, QSlider, QSpinBox, QSplitter, QTabBar, QTextEdit, QToolButton,
+    QVBoxLayout, QWidget,
 )
 
 from .. import __version__
 from ..analysis import AnalysisSession, ChordLabel, SymbolError, parse_symbol
 from ..checker import chords_from_session
+from ..edits import bar_chords, regenerate, regenerate_chord, regenerate_part, swap
 from ..export import EXPORT_ROOT, export_folder, export_part, export_parts
-from ..generator import Ensemble, GenerationError, Orchestration, generate
+from ..generator import (
+    APPROACH, APPROACHES, DENSITY_STEPS, DYNAMIC_STEPS, FORCES, TOP_INPUT, TOP_SMOOTH, GenerationError,
+    Orchestration, Settings, generate_all, with_dynamics,
+)
+from ..history import History
 from ..instruments import SECTIONS, instruments
 from ..midi_io import InputError, read_chord_file, write_notes
 from ..playback.player import Player
 from ..playback.synth import SynthError
+from ..presets import DEFAULT_PRESET, USER_PRESETS, Preset, find, load_all, preset_id, save_preset
 from ..theory import MAJOR_TONICS, MINOR_TONICS, Key, note_name
 from .chord_strip import ChordStrip, length_text
 from .grid import DragHandle, PartGrid, PianoRoll
 from .theme import MUTED
 
 DOCS = Path.home() / "Documents" / "OrchSketch"
+FORCE_NAMES = {"solo": "Solo", "section": "Section", "divisi": "Divisi"}
+DENSITY_NAMES = {1: "1 · sparse", 2: "2", 3: "3", 4: "4", 5: "5 · full"}
+CUSTOM = "custom"
+
+
+@dataclass(frozen=True)
+class EditState:
+    """One undo step: everything you can edit (orchestrations are shared, never changed in place)."""
+    labels: tuple = ()  # per segment: (correction or None, confirmed)
+    tonic: str = "A"
+    mode: str = "minor"
+    preset: str = DEFAULT_PRESET
+    active: frozenset = frozenset()
+    forces: str = "section"
+    density: int = 5
+    dynamics: str = "mf"
+    top_voice: str = TOP_SMOOTH
+    keep: bool = False
+    seed: int = 1
+    alts: tuple = (None, None, None)  # Orchestration, an error message (str) or None, for A, B, C
+    locks: tuple = (frozenset(), frozenset(), frozenset())
+    tab: int = 0
+    dirty: bool = False  # generation settings changed since the last Generate
+    extra: dict = field(default_factory=dict, compare=False, hash=False)
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"OrchSketch {__version__}")
-        self.resize(1280, 820)
+        self.resize(1360, 860)
         self.setAcceptDrops(True)
         self.settings = QSettings("OrchSketch", "OrchSketch")
         self.name_style = self.settings.value("note_names", "ableton")
         self.session: AnalysisSession | None = None
         self.selected: int | None = None
-        self.orch: Orchestration | None = None
+        self.alts: list = [None, None, None]
+        self.locks: list[frozenset] = [frozenset(), frozenset(), frozenset()]
+        self.tab = 0
+        self.dirty = False
         self.player: Player | None = None
         self.player_factory = Player  # tests replace this with a silent backend
         self.muted: set[str] = set()
         self.soloed: set[str] = set()
         self.export_root = EXPORT_ROOT
+        self.presets_folder = USER_PRESETS
+        self.presets, problems = load_all(self.presets_folder)
+        self.active: frozenset[str] = frozenset(find(self.presets, DEFAULT_PRESET).instruments)
+        self.history = History()
+        self._restoring = False
+        self.run_async = True  # tests set False: Generate then runs in the calling thread
+        self._pool = ThreadPoolExecutor(max_workers=1)
+        self._job = None
         self._build()
         self.playhead = QTimer(self)
         self.playhead.setInterval(50)
         self.playhead.timeout.connect(self._update_playhead)
+        self.job_timer = QTimer(self)
+        self.job_timer.setInterval(40)
+        self.job_timer.timeout.connect(self._poll_job)
+        self.history.reset(self.snapshot())
+        if problems:
+            QTimer.singleShot(0, lambda: self.statusBar().showMessage(
+                "Some saved presets couldn't be read: " + "; ".join(problems), 15000))
 
     # ------------------------------------------------------------------ layout
     def _build(self):
@@ -76,19 +129,12 @@ class MainWindow(QMainWindow):
         self.tempo.valueChanged.connect(self._tempo_changed)
         self.confirm_btn = QPushButton("Confirm all")
         self.confirm_btn.clicked.connect(self.confirm_all)
-        self.section_boxes: dict[str, QCheckBox] = {}
-        for sec in SECTIONS:
-            cb = QCheckBox(sec.capitalize())
-            cb.setChecked(True)
-            cb.setToolTip(f"Include the {sec} in the orchestration")
-            self.section_boxes[sec] = cb
-        self.seed = QSpinBox()
-        self.seed.setRange(1, 9999)
-        self.seed.setValue(1)
-        self.seed.setToolTip("Same chords, sections and seed always give the same result")
-        self.generate_btn = QPushButton("Generate")
-        self.generate_btn.setStyleSheet("QPushButton { font-weight: 600; }")
-        self.generate_btn.clicked.connect(self.generate)
+        self.undo_btn = QToolButton()
+        self.undo_btn.setText("↶ Undo")
+        self.undo_btn.clicked.connect(self.undo)
+        self.redo_btn = QToolButton()
+        self.redo_btn.setText("↷ Redo")
+        self.redo_btn.clicked.connect(self.redo)
         for w in (self.open_btn, self.file_label):
             bar.addWidget(w)
         bar.addStretch(1)
@@ -99,17 +145,53 @@ class MainWindow(QMainWindow):
         bar.addSpacing(16)
         bar.addWidget(self.confirm_btn)
         bar.addSpacing(16)
-        for cb in self.section_boxes.values():
-            bar.addWidget(cb)
-        bar.addWidget(QLabel("Seed"))
-        bar.addWidget(self.seed)
-        bar.addWidget(self.generate_btn)
+        bar.addWidget(self.undo_btn)
+        bar.addWidget(self.redo_btn)
         root.addLayout(bar)
+
+        gen = QHBoxLayout()
+        self.preset_box = QComboBox()
+        self.preset_box.setToolTip("Ensemble preset: sets the instruments and the slider starting points")
+        self._fill_presets(DEFAULT_PRESET)
+        self.preset_box.activated.connect(self._preset_chosen)
+        self.parts_btn = QPushButton("Parts…")
+        self.parts_btn.setToolTip("Turn single instruments on or off")
+        self.parts_btn.clicked.connect(lambda: self.show_menu(self.build_parts_menu()))
+        self.save_preset_btn = QPushButton("Save preset…")
+        self.save_preset_btn.setToolTip(f"Save the instruments and sliders as your own preset ({USER_PRESETS})")
+        self.save_preset_btn.clicked.connect(self.save_preset_dialog)
+        self.top_box = QComboBox()
+        self.top_box.addItem("Top voice: smooth", TOP_SMOOTH)
+        self.top_box.addItem("Top voice: follow input", TOP_INPUT)
+        self.top_box.setToolTip("Smooth: the top voice moves by the smallest step.\n"
+                                "Follow input: the top voice takes your clip's top note (nearest octave).")
+        self.top_box.currentIndexChanged.connect(lambda _: self._setting_changed("Top voice"))
+        self.keep_box = QCheckBox("Keep my voicing (strings)")
+        self.keep_box.setToolTip("Your input voicing is kept exactly as written, spread over the string lines "
+                                 "low to high; everything else is orchestrated around it.")
+        self.keep_box.toggled.connect(lambda _: self._setting_changed("Keep as-is"))
+        self.seed = QSpinBox()
+        self.seed.setRange(1, 9999)
+        self.seed.setValue(1)
+        self.seed.setToolTip("Same chords, settings and seed always give the same result")
+        self.seed.valueChanged.connect(lambda _: self._setting_changed("Seed"))
+        self.generate_btn = QPushButton("Generate")
+        self.generate_btn.clicked.connect(self.generate)
+        gen.addWidget(QLabel("Preset"))
+        for w in (self.preset_box, self.parts_btn, self.save_preset_btn):
+            gen.addWidget(w)
+        gen.addSpacing(16)
+        gen.addWidget(self.top_box)
+        gen.addWidget(self.keep_box)
+        gen.addStretch(1)
+        gen.addWidget(QLabel("Seed"))
+        gen.addWidget(self.seed)
+        gen.addWidget(self.generate_btn)
+        root.addLayout(gen)
 
         self.strip = ChordStrip()
         self.strip.cell_clicked.connect(self.chord_clicked)
         root.addWidget(self.strip)
-
         legend = QLabel(
             "Click a chord to confirm or change it.   Border:  grey = best guess · "
             "<span style='color:#4caf50'>green</span> = confirmed · "
@@ -119,19 +201,42 @@ class MainWindow(QMainWindow):
         legend.setStyleSheet(f"color: {MUTED}; font-size: 11px;")
         root.addWidget(legend)
 
+        tabs = QHBoxLayout()
+        self.tabs = QTabBar()
+        for a in APPROACHES:
+            self.tabs.addTab(f"{a} · {APPROACH[a].name}")
+        self.tabs.currentChanged.connect(self.set_tab)
+        self.regen_btn = QPushButton("Regenerate unlocked")
+        self.regen_btn.setToolTip("A new variation of this alternative; locked parts keep their notes")
+        self.regen_btn.clicked.connect(self.regenerate_unlocked)
+        self.reason_label = QLabel("")
+        self.reason_label.setStyleSheet(f"color: {MUTED};")
+        self.reason_label.setWordWrap(True)
+        tabs.addWidget(self.tabs)
+        tabs.addWidget(self.regen_btn)
+        tabs.addSpacing(12)
+        tabs.addWidget(self.reason_label, 1)
+        root.addLayout(tabs)
+
         self.details = QTextEdit()
         self.details.setReadOnly(True)
         self.grid = PartGrid(self.files_for_part)
         self.grid.part_selected.connect(self.show_part)
         self.grid.mute_toggled.connect(self.set_mute)
         self.grid.solo_toggled.connect(self.set_solo)
+        self.grid.lock_toggled.connect(self.set_lock)
+        self.grid.chord_menu_requested.connect(lambda i: self.show_menu(self.build_column_menu(i)))
+        self.grid.part_menu_requested.connect(lambda lid, i: self.show_menu(self.build_part_menu(lid, i)))
         self.piano = PianoRoll()
         split = QSplitter(Qt.Vertical)
         split.addWidget(self.grid)
         split.addWidget(self.piano)
         split.addWidget(self.details)
-        split.setSizes([420, 120, 90])
-        root.addWidget(split, 1)
+        split.setSizes([430, 120, 90])
+        middle = QHBoxLayout()
+        middle.addWidget(split, 1)
+        middle.addWidget(self._slider_panel())
+        root.addLayout(middle, 1)
 
         tr = QHBoxLayout()
         self.play_btn = QPushButton("▶ Play")
@@ -166,18 +271,61 @@ class MainWindow(QMainWindow):
         tr.addWidget(self.export_parts_btn)
         root.addLayout(tr)
         self.checker_label = QLabel("")
-        self.reason_label = QLabel("")
-        self.reason_label.setStyleSheet(f"color: {MUTED};")
         info = QHBoxLayout()
-        info.addWidget(self.checker_label)
-        info.addSpacing(20)
-        info.addWidget(self.reason_label, 1)
+        info.addWidget(self.checker_label, 1)
         root.addLayout(info)
         self.setCentralWidget(central)
         self.status_label = QLabel("")
         self.statusBar().addWidget(self.status_label, 1)
         self._menus()
+        self._apply_preset_values(find(self.presets, DEFAULT_PRESET))
         self._refresh()
+
+    def _slider_panel(self) -> QWidget:
+        box = QGroupBox("All sections")
+        box.setToolTip("Global sliders (per-section sliders come in Milestone 5)")
+        form = QFormLayout(box)
+
+        def slider(n, tip):
+            s = QSlider(Qt.Horizontal)
+            s.setRange(0, n - 1)
+            s.setPageStep(1)
+            s.setTickPosition(QSlider.TicksBelow)
+            s.setTickInterval(1)
+            s.setToolTip(tip)
+            s.setMinimumWidth(150)
+            return s
+
+        self.character = slider(2, "Character: Safe uses chord tones only. Moderate arrives in Milestone 5.")
+        self.character.setEnabled(False)
+        self.character_label = QLabel("Safe")
+        self.forces = slider(len(FORCES), "Forces: solo players, full sections, or sections with divisi splits")
+        self.forces_label = QLabel("")
+        self.density = slider(len(DENSITY_STEPS), "Density: how many of the preset's parts play, "
+                                                  "and how many doublings")
+        self.density_label = QLabel("")
+        self.dynamics = slider(len(DYNAMIC_STEPS), "Dynamics: velocity and CC1 (pp 30 … ff 120). "
+                                                   "Applies at once, without regenerating.")
+        self.dynamics_label = QLabel("")
+        for name, s, lab in (("Character", self.character, self.character_label),
+                             ("Forces", self.forces, self.forces_label),
+                             ("Density", self.density, self.density_label),
+                             ("Dynamics", self.dynamics, self.dynamics_label)):
+            row = QVBoxLayout()
+            row.addWidget(s)
+            lab.setStyleSheet(f"color: {MUTED}; font-size: 11px;")
+            row.addWidget(lab)
+            w = QWidget()
+            w.setLayout(row)
+            form.addRow(name, w)
+        self.forces.valueChanged.connect(lambda _: self._slider_moved("Forces"))
+        self.density.valueChanged.connect(lambda _: self._slider_moved("Density"))
+        self.dynamics.valueChanged.connect(self._dynamics_moved)
+        note = QLabel("Forces and Density take effect at the next Generate.\nDynamics applies at once.")
+        note.setStyleSheet(f"color: {MUTED}; font-size: 11px;")
+        form.addRow(note)
+        box.setMaximumWidth(270)
+        return box
 
     def _menus(self):
         m = self.menuBar().addMenu("&File")
@@ -190,6 +338,18 @@ class MainWindow(QMainWindow):
             a.setShortcut(sc)
             a.triggered.connect(slot)
             m.addAction(a)
+        e = self.menuBar().addMenu("&Edit")
+        self.undo_action = QAction("&Undo", self)
+        self.undo_action.setShortcut(QKeySequence("Ctrl+Z"))
+        self.undo_action.triggered.connect(self.undo)
+        self.redo_action = QAction("&Redo", self)
+        self.redo_action.setShortcuts([QKeySequence("Ctrl+Y"), QKeySequence("Ctrl+Shift+Z")])
+        self.redo_action.triggered.connect(self.redo)
+        regen = QAction("Re&generate unlocked parts", self)
+        regen.setShortcut(QKeySequence("Ctrl+R"))
+        regen.triggered.connect(self.regenerate_unlocked)
+        for a in (self.undo_action, self.redo_action, regen):
+            e.addAction(a)
         v = self.menuBar().addMenu("&View")
         group = QActionGroup(self)
         for style, text in (("ableton", "Ableton note names (middle C = C3)"),
@@ -199,10 +359,15 @@ class MainWindow(QMainWindow):
             a.triggered.connect(lambda _=False, s=style: self.set_name_style(s))
             group.addAction(a)
             v.addAction(a)
+        for i, a in enumerate(APPROACHES):
+            act = QAction(f"Alternative {a}", self)
+            act.setShortcut(QKeySequence(f"Ctrl+{i + 1}"))
+            act.triggered.connect(lambda _=False, k=i: self.tabs.setCurrentIndex(k))
+            v.addAction(act)
         h = self.menuBar().addMenu("&Help")
         a = QAction("&About", self)
         a.triggered.connect(lambda: QMessageBox.about(
-            self, "OrchSketch", f"OrchSketch {__version__}\nMilestone 3: first orchestration."))
+            self, "OrchSketch", f"OrchSketch {__version__}\nMilestone 4: control."))
         h.addAction(a)
 
     def _fill_tonics(self, current: str):
@@ -213,6 +378,106 @@ class MainWindow(QMainWindow):
         idx = self.tonic.findText(current)
         self.tonic.setCurrentIndex(idx if idx >= 0 else 0)
         self.tonic.blockSignals(False)
+
+    def _fill_presets(self, current: str):
+        self.preset_box.blockSignals(True)
+        self.preset_box.clear()
+        for p in self.presets:
+            self.preset_box.addItem(p.name + ("" if p.builtin else "  (yours)"), p.id)
+        self.preset_box.addItem("Custom", CUSTOM)
+        idx = self.preset_box.findData(current)
+        self.preset_box.setCurrentIndex(idx if idx >= 0 else self.preset_box.count() - 1)
+        self.preset_box.blockSignals(False)
+
+    # ------------------------------------------------------------------ current alternative
+    @property
+    def orch(self) -> Orchestration | None:
+        o = self.alts[self.tab]
+        return o if isinstance(o, Orchestration) else None
+
+    @property
+    def approach(self) -> str:
+        return APPROACHES[self.tab]
+
+    def gen_settings(self) -> Settings:
+        from ..generator import Ensemble
+        ens = Ensemble(instruments=self.active, forces=FORCES[self.forces.value()],
+                       density=DENSITY_STEPS[self.density.value()])
+        tops: tuple = ()
+        keep = None
+        if self.session is not None:
+            voicings = [tuple(sorted(r.segment.pitches)) for r in self.session.chord_results]
+            tops = tuple(max(v) if v else None for v in voicings)
+            if self.keep_box.isChecked():
+                keep = tuple(voicings)
+        return Settings(ens, self.top_box.currentData(), tops, keep, DYNAMIC_STEPS[self.dynamics.value()])
+
+    # ------------------------------------------------------------------ undo / redo
+    def snapshot(self) -> EditState:
+        labels = tuple((r.correction, r.confirmed) for r in self.session.results) if self.session else ()
+        return EditState(labels, self.tonic.currentText(), self.mode.currentText(),
+                         self.preset_box.currentData() or CUSTOM, self.active, FORCES[self.forces.value()],
+                         DENSITY_STEPS[self.density.value()], DYNAMIC_STEPS[self.dynamics.value()],
+                         self.top_box.currentData(), self.keep_box.isChecked(), self.seed.value(),
+                         tuple(self.alts), tuple(self.locks), self.tab, self.dirty)
+
+    def record(self, label: str):
+        if not self._restoring:
+            self.history.push(self.snapshot(), label)
+        self._refresh_undo()
+
+    def undo(self):
+        state = self.history.undo()
+        if state is not None:
+            self.restore(state)
+            self.statusBar().showMessage(f"Undone: {self.history.redo_label()}", 5000)
+
+    def redo(self):
+        state = self.history.redo()
+        if state is not None:
+            self.restore(state)
+            self.statusBar().showMessage(f"Redone: {self.history.undo_label()}", 5000)
+
+    def restore(self, st: EditState):
+        self._restoring = True
+        try:
+            blocked = (self.tonic, self.mode, self.preset_box, self.forces, self.density, self.dynamics,
+                       self.top_box, self.keep_box, self.seed, self.tabs)
+            for w in blocked:
+                w.blockSignals(True)
+            self.mode.setCurrentText(st.mode)
+            self._fill_tonics(st.tonic)
+            if self.session is not None:
+                if self.session.key != Key(st.tonic, st.mode):
+                    self.session.set_key(Key(st.tonic, st.mode))
+                for r, (corr, conf) in zip(self.session.results, st.labels):
+                    r.correction, r.confirmed = corr, conf
+            self._fill_presets(st.preset)
+            self.active = st.active
+            self.forces.setValue(FORCES.index(st.forces))
+            self.density.setValue(DENSITY_STEPS.index(st.density))
+            self.dynamics.setValue(DYNAMIC_STEPS.index(st.dynamics))
+            self.top_box.setCurrentIndex(self.top_box.findData(st.top_voice))
+            self.keep_box.setChecked(st.keep)
+            self.seed.setValue(st.seed)
+            self.tabs.setCurrentIndex(st.tab)
+            for w in blocked:
+                w.blockSignals(False)
+            self.alts, self.locks, self.tab, self.dirty = list(st.alts), list(st.locks), st.tab, st.dirty
+            self._update_slider_labels()
+            self._show_current()
+        finally:
+            self._restoring = False
+        self._refresh()
+
+    def _refresh_undo(self):
+        u, r = self.history.can_undo(), self.history.can_redo()
+        for w in (self.undo_btn, self.undo_action):
+            w.setEnabled(u)
+        for w in (self.redo_btn, self.redo_action):
+            w.setEnabled(r)
+        self.undo_btn.setToolTip(f"Undo {self.history.undo_label()} (Ctrl+Z)" if u else "Nothing to undo")
+        self.redo_btn.setToolTip(f"Redo {self.history.redo_label()} (Ctrl+Y)" if r else "Nothing to redo")
 
     # ------------------------------------------------------------------ key
     def key(self) -> Key:
@@ -236,6 +501,7 @@ class MainWindow(QMainWindow):
         if self.session:
             self.session.set_key(self.key())
             self.clear_orchestration("The key changed - press Generate again.")
+            self.record(f"Key {self.key().label()}")
         self._refresh()
 
     # ------------------------------------------------------------------ files
@@ -254,8 +520,10 @@ class MainWindow(QMainWindow):
         self.session = AnalysisSession(clip, self.key())
         self.selected = None
         self.clear_orchestration()
+        self.locks = [frozenset(), frozenset(), frozenset()]
         self.file_label.setText(f"{Path(path).name}  ·  {clip.bars} bars")
         self.file_label.setStyleSheet("")
+        self.history.reset(self.snapshot(), "Open file")
         self._refresh()
         if clip.warnings:
             self.statusBar().showMessage(" ".join(dict.fromkeys(clip.warnings)), 10000)
@@ -310,6 +578,11 @@ class MainWindow(QMainWindow):
         """Pop up a menu at the mouse (separate method so tests can replace it)."""
         menu.exec(QCursor.pos() + QPoint(4, 4))
 
+    def ask_text(self, title: str, label: str, text: str = "") -> str | None:
+        """Ask for a line of text (separate method so tests can replace it)."""
+        value, ok = QInputDialog.getText(self, title, label, text=text)
+        return value if ok else None
+
     def build_chord_menu(self, index: int) -> QMenu:
         r = self.session.results[index]
         key = self.key()
@@ -340,14 +613,14 @@ class MainWindow(QMainWindow):
     def apply_label(self, index: int, label: ChordLabel):
         self.session.correct(index, label)
         self.clear_orchestration("A chord changed - press Generate again.")
+        self.record(f"Chord {label.symbol(self.key())}")
         self._refresh()
 
     def type_chord_dialog(self, index: int):
         r = self.session.results[index]
         current = r.label.symbol(self.key()) if r.label else ""
-        text, ok = QInputDialog.getText(self, "Type a chord",
-                                        "Chord symbol (e.g. Am7, C/E, Bbmaj7, F#m7b5, A5):", text=current)
-        if ok and text.strip():
+        text = self.ask_text("Type a chord", "Chord symbol (e.g. Am7, C/E, Bbmaj7, F#m7b5, A5):", current)
+        if text and text.strip():
             err = self.type_chord(index, text)
             if err:
                 QMessageBox.warning(self, "Chord not understood", err)
@@ -363,12 +636,14 @@ class MainWindow(QMainWindow):
     def revert(self, index: int):
         self.session.revert(index)
         self.clear_orchestration("A chord changed - press Generate again.")
+        self.record("Back to best guess")
         self._refresh()
 
     def confirm_all(self):
         if not self.session:
             return
         unset = self.session.confirm_all()
+        self.record("Confirm all")
         self._refresh()
         if unset:
             QMessageBox.information(self, "Some chords need you",
@@ -377,9 +652,112 @@ class MainWindow(QMainWindow):
     def set_name_style(self, style: str):
         self.name_style = style
         self.settings.setValue("note_names", style)
-        if self.orch is not None:
-            self.grid.show_orchestration(self.orch, self.key(), style)
+        self._show_current()
         self._refresh()
+
+    # ------------------------------------------------------------------ presets, parts, sliders
+    def _apply_preset_values(self, p: Preset):
+        for w in (self.forces, self.density, self.dynamics):
+            w.blockSignals(True)
+        self.forces.setValue(FORCES.index(p.forces))
+        self.density.setValue(DENSITY_STEPS.index(p.density))
+        self.dynamics.setValue(DYNAMIC_STEPS.index(p.dynamics))
+        for w in (self.forces, self.density, self.dynamics):
+            w.blockSignals(False)
+        self.active = frozenset(p.instruments)
+        self._update_slider_labels()
+
+    def set_preset(self, pid: str):
+        p = find(self.presets, pid)
+        if p is None:
+            return
+        self._fill_presets(pid)
+        old_dyn = DYNAMIC_STEPS[self.dynamics.value()]
+        self._apply_preset_values(p)
+        self.dirty = True
+        if DYNAMIC_STEPS[self.dynamics.value()] != old_dyn:
+            self._apply_dynamics()
+        self.record(f"Preset {p.name}")
+        self._refresh()
+
+    def _preset_chosen(self, index: int):
+        pid = self.preset_box.itemData(index)
+        if pid != CUSTOM:
+            self.set_preset(pid)
+
+    def build_parts_menu(self) -> QMenu:
+        menu = QMenu(self)
+        insts = instruments()
+        for sec in SECTIONS:
+            head = menu.addAction(sec.capitalize())
+            head.setEnabled(False)
+            for inst in sorted((i for i in insts.values() if i.section == sec), key=lambda i: i.order):
+                a = menu.addAction("    " + inst.name)
+                a.setCheckable(True)
+                a.setChecked(inst.id in self.active)
+                a.toggled.connect(lambda on, iid=inst.id: self.set_instrument(iid, on))
+        return menu
+
+    def set_instrument(self, inst_id: str, on: bool):
+        new = self.active | {inst_id} if on else self.active - {inst_id}
+        if not new:
+            self.notify("No instruments", "At least one instrument has to play.")
+            return
+        if new == self.active:
+            return
+        self.active = frozenset(new)
+        self._fill_presets(CUSTOM)
+        for p in self.presets:  # back on a preset's exact line-up: show that preset
+            if frozenset(p.instruments) == self.active:
+                self._fill_presets(p.id)
+                break
+        self.dirty = True
+        self.record(f"{'Add' if on else 'Remove'} {instruments()[inst_id].name}")
+        self._refresh()
+
+    def save_preset_dialog(self):
+        name = self.ask_text("Save preset", "Name for your preset:")
+        if name and name.strip():
+            self.save_current_preset(name.strip())
+
+    def save_current_preset(self, name: str) -> Preset:
+        p = Preset(preset_id(name), name, tuple(sorted(self.active)), FORCES[self.forces.value()],
+                   DENSITY_STEPS[self.density.value()], DYNAMIC_STEPS[self.dynamics.value()])
+        path = save_preset(p, self.presets_folder)
+        self.presets, _ = load_all(self.presets_folder)
+        self._fill_presets(p.id)
+        self.statusBar().showMessage(f"Saved preset {name} to {path}", 10000)
+        return p
+
+    def _update_slider_labels(self):
+        self.forces_label.setText(FORCE_NAMES[FORCES[self.forces.value()]])
+        self.density_label.setText(DENSITY_NAMES[DENSITY_STEPS[self.density.value()]])
+        self.dynamics_label.setText(DYNAMIC_STEPS[self.dynamics.value()])
+
+    def _slider_moved(self, name: str):
+        self._update_slider_labels()
+        self._setting_changed(name)
+
+    def _setting_changed(self, name: str):
+        """A generation setting changed: it takes effect at the next Generate."""
+        if self._restoring:
+            return
+        self.dirty = True
+        self.record(name)
+        self._refresh()
+
+    def _dynamics_moved(self, _):
+        self._update_slider_labels()
+        if self._restoring:
+            return
+        self._apply_dynamics()
+        self.record(f"Dynamics {DYNAMIC_STEPS[self.dynamics.value()]}")
+
+    def _apply_dynamics(self):
+        dyn = DYNAMIC_STEPS[self.dynamics.value()]
+        self.alts = [with_dynamics(o, dyn) if isinstance(o, Orchestration) else o for o in self.alts]
+        if self.orch is not None and self.player is not None and self.player.seq is not None:
+            self._load_player()
 
     # ------------------------------------------------------------------ display
     def _refresh(self):
@@ -387,13 +765,26 @@ class MainWindow(QMainWindow):
         has = self.session is not None
         self.confirm_btn.setEnabled(has)
         ready = has and self.session.all_confirmed and bool(self.session.chord_results)
-        self.generate_btn.setEnabled(ready)
-        self.generate_btn.setToolTip("Orchestrate the confirmed chords" if ready
-                                     else "Confirm every chord first (Confirm all)")
-        for w in (self.play_btn, self.export_parts_btn, self.all_handle):
-            w.setEnabled(self.orch is not None)
+        busy = self._job is not None
+        self.generate_btn.setEnabled(ready and not busy)
+        if busy:
+            self.generate_btn.setText("Generating…")
+        else:
+            self.generate_btn.setText("Generate •" if self.dirty and any(self.alts) else "Generate")
+        self.generate_btn.setStyleSheet("QPushButton { font-weight: 600; }" + (
+            " QPushButton:enabled { background: #7a5b17; }" if self.dirty and any(self.alts) and not busy else ""))
+        self.generate_btn.setToolTip(
+            "Settings changed: press Generate to build the alternatives with them" if self.dirty and any(self.alts)
+            else "Orchestrate the confirmed chords as alternatives A, B and C" if ready
+            else "Confirm every chord first (Confirm all)")
+        for w in (self.play_btn, self.export_parts_btn, self.all_handle, self.regen_btn):
+            w.setEnabled(self.orch is not None and not busy)
         self.strip.show_results(self.session.results if has else [], key, self.selected)
         self.details.setHtml(self._details_html(key))
+        for i, a in enumerate(APPROACHES):
+            o = self.alts[i]
+            mark = "" if isinstance(o, Orchestration) else (" ⚠" if isinstance(o, str) else "")
+            self.tabs.setTabText(i, f"{a} · {APPROACH[a].name}{mark}")
         if has:
             chords = self.session.chord_results
             n_conf = sum(r.confirmed for r in chords)
@@ -405,6 +796,7 @@ class MainWindow(QMainWindow):
             self.status_label.setText(msg)
         else:
             self.status_label.setText("Open or drop a block-chord MIDI file (4/4, up to 16 bars).")
+        self._refresh_undo()
 
     def _details_html(self, key: Key) -> str:
         if not self.session:
@@ -412,7 +804,15 @@ class MainWindow(QMainWindow):
                     "&gt; Export MIDI Clip), then drop it here. Set the key and mode first or after - "
                     "labels update either way.</p>")
         if self.selected is None:
-            return f"<p style='color:{MUTED}'>Click a chord to see its notes and alternatives.</p>"
+            o = self.orch
+            if o is not None and o.report.issues:
+                rows = [o.report.summary()] + [
+                    f"<span style='color:{'#e05252' if i.severity == 'error' else '#e6c84f'}'>"
+                    f"{i.severity}</span> {i.message}" for i in o.report.issues[:60]]
+                return "<br>".join(rows)
+            return (f"<p style='color:{MUTED}'>Click a chord to see its notes and alternatives. In the grid, "
+                    "click a chord header to regenerate or swap it, and right-click a part to lock or "
+                    "regenerate it.</p>")
         r = self.session.results[self.selected]
         seg = r.segment
         bar, beat = seg.start // 1920 + 1, (seg.start % 1920) / 480 + 1
@@ -430,6 +830,49 @@ class MainWindow(QMainWindow):
                                                          for a in r.alternatives))
         return "<br>".join(rows)
 
+    def _show_current(self):
+        """Show the current tab's alternative in the grid, reason line and checker summary."""
+        o = self.alts[self.tab]
+        if isinstance(o, Orchestration):
+            self.grid.show_orchestration(o, self.key(), self.name_style, self.locks[self.tab])
+            self.checker_label.setText(o.report.summary() + (
+                "  (red cells come from your own edits; Ctrl+Z undoes them)" if o.report.errors else ""))
+            self.reason_label.setText(f"{o.approach} · {o.reason}")
+            sel = self.grid.line_ids[0] if self.grid.line_ids else None
+            if sel:
+                self.grid.select_part(sel)
+        elif isinstance(o, str):
+            self.grid.clear_grid(f"Alternative {self.approach} couldn't be built: {o}")
+            self.checker_label.setText("")
+            self.reason_label.setText("")
+            self.piano.clear_part()
+        else:
+            self.grid.clear_grid("Confirm the chords, then press Generate." if not any(self.alts)
+                                 else "Press Generate.")
+            self.checker_label.setText("")
+            self.reason_label.setText("")
+            self.piano.clear_part()
+        self.muted, self.soloed = set(), set()
+        for b in list(self.section_mute.values()) + list(self.section_solo.values()):
+            b.blockSignals(True)
+            b.setChecked(False)
+            b.blockSignals(False)
+        if self.player is not None:
+            if self.orch is not None and self.player.seq is not None:
+                self._load_player()
+            elif self.orch is None:
+                self.stop()
+                self.player.seq = None
+
+    def set_tab(self, index: int):
+        self.tab = index
+        if self.tabs.currentIndex() != index:
+            self.tabs.blockSignals(True)
+            self.tabs.setCurrentIndex(index)
+            self.tabs.blockSignals(False)
+        self._show_current()
+        self._refresh()
+
     # ------------------------------------------------------------------ messages (replaceable in tests)
     def notify(self, title: str, text: str):
         QMessageBox.information(self, title, text)
@@ -438,10 +881,8 @@ class MainWindow(QMainWindow):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     # ------------------------------------------------------------------ generate
-    def active_sections(self) -> frozenset[str]:
-        return frozenset(s for s, cb in self.section_boxes.items() if cb.isChecked())
-
-    def generate(self) -> Orchestration | None:
+    def generate(self):
+        """Build A, B and C (in the background). Locked parts of each alternative are kept."""
         if not self.session:
             self.notify("Nothing to orchestrate", "Open a chord file first.")
             return None
@@ -449,42 +890,70 @@ class MainWindow(QMainWindow):
             self.notify("Confirm the chords first",
                         "Generation only uses confirmed chords. Click Confirm all (or confirm each chord).")
             return None
-        secs = self.active_sections()
-        if not secs:
-            self.notify("No sections", "Tick at least one section (woodwinds, brass, strings or choir).")
+        if self._job is not None:
             return None
         chords = chords_from_session(self.session)
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        try:
-            orch = generate(chords, self.key(), seed=self.seed.value(), ensemble=Ensemble(secs))
-        except GenerationError as exc:
-            QApplication.restoreOverrideCursor()
-            self.notify("Couldn't orchestrate", str(exc))
-            return None
-        QApplication.restoreOverrideCursor()
-        self.stop()
-        self.orch = orch
-        self.muted, self.soloed = set(), set()
-        for b in list(self.section_mute.values()) + list(self.section_solo.values()):
-            b.blockSignals(True)
-            b.setChecked(False)
-            b.blockSignals(False)
-        self.grid.show_orchestration(orch, self.key(), self.name_style)
-        if self.player is not None and self.player.seq is not None:
-            self._load_player()
-        self.checker_label.setText(orch.report.summary())
-        self.reason_label.setText(f"A · {orch.reason}")
-        self.piano.clear_part()
-        self.grid.select_part(orch.lines[0].id)
+        settings = self.gen_settings()
+        previous = {a: (o if isinstance(o, Orchestration) else None) for a, o in zip(APPROACHES, self.alts)}
+        locks = {a: lk for a, lk in zip(APPROACHES, self.locks)}
+        args = (chords, self.key())
+        kwargs = dict(seed=self.seed.value(), settings=settings, locks=locks, previous=previous)
+        if not self.run_async:
+            return self._generated(generate_all(*args, **kwargs))
+        self._job = self._pool.submit(generate_all, *args, **kwargs)
+        self.statusBar().showMessage("Generating alternatives A, B and C…")
+        QApplication.setOverrideCursor(Qt.BusyCursor)
+        self.job_timer.start()
         self._refresh()
-        return orch
+        return None
+
+    def _poll_job(self):
+        if self._job is None or not self._job.done():
+            return
+        job, self._job = self._job, None
+        self.job_timer.stop()
+        QApplication.restoreOverrideCursor()
+        try:
+            result = job.result()
+        except Exception as exc:  # noqa: BLE001 - shown to the user, logged by the app's hook
+            self.notify("Couldn't orchestrate", f"Something went wrong: {exc}")
+            self._refresh()
+            return
+        self._generated(result)
+
+    def wait_for_generation(self, timeout: float = 120.0):
+        """Block until a background Generate has finished and been shown (for tests and scripts)."""
+        if self._job is not None:
+            self._job.result(timeout=timeout)
+            self._poll_job()
+
+    def _generated(self, result: dict):
+        self.stop()
+        self.alts = [result[a] if isinstance(result[a], Orchestration) else str(result[a]) for a in APPROACHES]
+        # locks only make sense for parts that still exist
+        self.locks = [frozenset(lid for lid in lk if isinstance(o, Orchestration) and lid in o.cells)
+                      for lk, o in zip(self.locks, self.alts)]
+        self.dirty = False
+        self.statusBar().showMessage("Generated alternatives A, B and C.", 5000)
+        failed = [(a, o) for a, o in zip(APPROACHES, self.alts) if isinstance(o, str)]
+        if len(failed) == 3:
+            self.notify("Couldn't orchestrate", failed[0][1])
+        elif failed:
+            self.statusBar().showMessage(" ".join(f"{a}: {msg}" for a, msg in failed), 15000)
+        self.piano.clear_part()
+        self.selected = None
+        self._show_current()
+        self.record("Generate")
+        self._refresh()
+        return self.orch
 
     def clear_orchestration(self, message: str | None = None):
-        if self.orch is None:
+        if not any(self.alts):
             self.grid.clear_grid()
             return
         self.stop()
-        self.orch = None
+        self.alts = [None, None, None]
+        self.locks = [frozenset(), frozenset(), frozenset()]
         self.grid.clear_grid(message or "Confirm the chords, then press Generate.")
         self.piano.clear_part()
         self.checker_label.setText("")
@@ -492,6 +961,106 @@ class MainWindow(QMainWindow):
         if self.player is not None:
             self.player.seq = None
 
+    # ------------------------------------------------------------------ edits on the current alternative
+    def _edit(self, label: str, fn) -> Orchestration | None:
+        o = self.orch
+        if o is None:
+            return None
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            new = fn(o)
+        except GenerationError as exc:
+            QApplication.restoreOverrideCursor()
+            self.notify("Can't do that here", str(exc))
+            return None
+        QApplication.restoreOverrideCursor()
+        self.alts[self.tab] = new
+        self._show_current()
+        self.record(label)
+        self._refresh()
+        if new.report.errors:
+            self.statusBar().showMessage("This edit breaks a rule (red cells). Ctrl+Z undoes it.", 10000)
+        return new
+
+    def regenerate_unlocked(self):
+        lk = self.locks[self.tab]
+        return self._edit(f"Regenerate {self.approach}", lambda o: regenerate(o, lk))
+
+    def regenerate_one_part(self, line_id: str):
+        name = self.orch.line(line_id).label if self.orch else line_id
+        return self._edit(f"Regenerate {name}", lambda o: regenerate_part(o, line_id))
+
+    def regenerate_one_chord(self, index: int):
+        lk = self.locks[self.tab]
+        return self._edit(f"Regenerate chord {index + 1}", lambda o: regenerate_chord(o, index, lk))
+
+    def swap_from(self, source: str, index: int, whole_bar: bool = False):
+        src = self.alts[APPROACHES.index(source)]
+        if not isinstance(src, Orchestration):
+            self.notify("Nothing to swap", f"Alternative {source} hasn't been built.")
+            return None
+        lk = self.locks[self.tab]
+        what = f"bar {self.orch.chords[index].start // 1920 + 1}" if whole_bar else f"chord {index + 1}"
+
+        def do(o):
+            idx = bar_chords(o, index) if whole_bar else [index]
+            return swap(o, src, idx, lk)
+        return self._edit(f"Use {source} for {what}", do)
+
+    def set_lock(self, line_id: str, on: bool):
+        if self._restoring or self.orch is None:
+            return
+        lk = self.locks[self.tab]
+        self.locks[self.tab] = lk | {line_id} if on else lk - {line_id}
+        # don't rebuild the grid here: the lock button that sent this signal lives in it
+        self.grid.set_locked(line_id, on, self.orch.line(line_id).label)
+        self.record(f"{'Lock' if on else 'Unlock'} {self.orch.line(line_id).label}")
+
+    def build_column_menu(self, index: int) -> QMenu:
+        menu = QMenu(self)
+        o = self.orch
+        if o is None:
+            return menu
+        span = o.chords[index]
+        head = menu.addAction(f"{span.label.symbol(self.key())} (chord {index + 1})")
+        head.setEnabled(False)
+        a = menu.addAction("Regenerate this chord")
+        a.triggered.connect(lambda: self.regenerate_one_chord(index))
+        menu.addSeparator()
+        for src in APPROACHES:
+            if src == o.approach and all(s == o.approach for s in o.sources):
+                continue
+            ok = isinstance(self.alts[APPROACHES.index(src)], Orchestration)
+            a1 = menu.addAction(f"Use {src}'s voicing for this chord" + (" (back to own)" if src == o.approach else ""))
+            a1.setEnabled(ok)
+            a1.triggered.connect(lambda _=False, s=src: self.swap_from(s, index))
+            a2 = menu.addAction(f"Use {src}'s voicing for this bar")
+            a2.setEnabled(ok)
+            a2.triggered.connect(lambda _=False, s=src: self.swap_from(s, index, whole_bar=True))
+        return menu
+
+    def build_part_menu(self, line_id: str, index: int = -1) -> QMenu:
+        menu = QMenu(self)
+        o = self.orch
+        if o is None:
+            return menu
+        ln = o.line(line_id)
+        locked = line_id in self.locks[self.tab]
+        a = menu.addAction(("Unlock " if locked else "Lock ") + ln.label)
+        a.triggered.connect(lambda: self.grid.lock_buttons[line_id].setChecked(not locked)
+                            if line_id in self.grid.lock_buttons else self.set_lock(line_id, not locked))
+        a = menu.addAction(f"Regenerate {ln.label} only")
+        a.setEnabled(not locked and bool(o.part(line_id).notes))
+        a.triggered.connect(lambda: self.regenerate_one_part(line_id))
+        if index >= 0:
+            menu.addSeparator()
+            sub = self.build_column_menu(index)
+            for act in sub.actions():
+                act.setParent(menu)
+                menu.addAction(act)
+        return menu
+
+    # ------------------------------------------------------------------ part display
     def show_part(self, line_id: str):
         if not self.orch:
             return
@@ -502,15 +1071,19 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ playback
     def _load_player(self):
         insts = instruments()
-        parts = [(ln.id, insts[ln.instrument].gm_program, list(self.orch.part(ln.id).notes)) for ln in self.orch.lines]
-        sections = {ln.id: insts[ln.instrument].section for ln in self.orch.lines}
+        lines = self.orch.sounding_lines
+        parts = [(ln.id, ln.program if ln.program is not None else insts[ln.instrument].gm_program,
+                  list(self.orch.part(ln.id).notes)) for ln in lines]
+        sections = {ln.id: insts[ln.instrument].section for ln in lines}
         self.player.loop = self.loop_box.isChecked()
         self.player.set_bpm(self.tempo.value())
         self.player.load(parts, self.session.clip.length, sections)
         for pid in self.muted:
-            self.player.seq.set_mute(pid, True)
+            if pid in sections:
+                self.player.seq.set_mute(pid, True)
         for pid in self.soloed:
-            self.player.seq.set_solo(pid, True)
+            if pid in sections:
+                self.player.seq.set_solo(pid, True)
 
     def play(self) -> bool:
         if not self.orch:
@@ -605,11 +1178,15 @@ class MainWindow(QMainWindow):
             return []
         files = self.files_for_all()
         folder = self.parts_folder()
-        self.statusBar().showMessage(f"Exported {len(files)} parts to {folder}", 15000)
+        self.statusBar().showMessage(f"Exported {len(files)} parts of alternative {self.approach} to {folder}",
+                                     15000)
         self.open_folder(folder)
         return files
 
     def closeEvent(self, e):  # noqa: N802
+        if self._job is not None:
+            self._job.cancel()
+        self._pool.shutdown(wait=False, cancel_futures=True)
         if self.player is not None:
             self.player.close()
         super().closeEvent(e)

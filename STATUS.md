@@ -4,27 +4,36 @@
 > The chat that finishes a milestone updates this file before it ends.
 
 ## Current state
-- **Version:** v0.3
-- **Last milestone completed:** 3 — First orchestration
-- **Next milestone:** 4 — Control (SPEC.md §10)
+- **Version:** v0.4
+- **Last milestone completed:** 4 — Control
+- **Next milestone:** 5 — Motion (SPEC.md §10)
 - **Repo:** https://github.com/shenry42/orchsketch
-- **Last updated:** 2026-11-11
+- **Last updated:** 2026-11-11 (Milestone 4)
 
 ## Milestones
 - [x] 1 — v0.1 Read and label (+ packaging spike, audio test with Ableton open)
 - [x] 2 — v0.2 Data and checker (range + low-interval tables cross-checked)
 - [x] 3 — v0.3 First orchestration (safe mode, grid, playback, per-part export)
-- [ ] 4 — v0.4 Control (A/B/C alternatives, lock, swap, undo, global sliders, presets)
+- [x] 4 — v0.4 Control (A/B/C alternatives, lock, swap, undo, global sliders, presets)
 - [ ] 5 — v0.5 Motion (patterns, bass, melody, moderate mode, per-section sliders)
 - [ ] 6 — v1.0 Finish (projects, full export, .exe, full test-set pass, Ableton check)
 
 ## Test results (latest run)
-- Automated tests: 259 passed / 0 failed (Windows, Python 3.12.10, `scripts\run_tests.bat`, 100 s)
-- Chord labels on 12-file test set: 12/12 correct, every chord as the best guess (not just among alternatives).
-  Also stable under 60 random re-voicings per chord (spread, doubled, bass in octaves 1–3).
-- Checker errors in generated output: **0**. All 12 test files × seeds 1–8 in full epic, plus every one of the 15
-  section combinations: 276 runs, 0 errors, 0 warnings of any kind (not even parallels). Checker on hand-made examples: 14/14.
-- Ear-test ratings: see tests/ratings.csv (avg score: —). Formal ear test is with all three alternatives (Milestone 4+).
+- Automated tests: 322 passed / 0 failed (Claude's Linux workspace, about 3 min; Windows run via `release.bat`).
+- Chord labels on 12-file test set: 12/12 correct, every chord as the best guess (unchanged since Milestone 1).
+- Checker errors in generated output: **0**.
+  - Approach A gives exactly the v0.3 notes on all 216 Milestone 3 runs (12 files × seeds 1–3 plus all 15
+    section combinations) and still has 0 warnings of any kind.
+  - B and C: the same 432 runs, with 0 errors and 0 warnings.
+  - Every preset × A/B/C × 12 files, Forces × Density samples, follow input and keep-as-is: 0 errors and 0
+    `generator_must_pass` warnings (some allowed parallel warnings; see Known issues).
+- Speed: all three alternatives for 16 bars take about 1.8 s in Claude's workspace (one took 1.9 s before
+  Milestone 4) and run in the background.
+- Ear-test ratings (tests/ratings.csv): test 1 A/B/C all 5/5 (Sam, v0.4: "a little basic/generic for now,
+  room to grow"). The formal pass over all test files is in Milestone 6.
+- Milestone 4 manual checks (Sam, 2026-11-11): tabs and reasons, lock + Regenerate unlocked, chord-header
+  swap with Ctrl+Z/Ctrl+Y, Regenerate Horn 2 only, Dynamics live, Density → orange Generate, Low and heavy,
+  keep-as-is + follow input, export names `_B.mid`: all pass ("Everything is working").
 - Milestone 3 manual checks (Sam, 2026-11-11):
   - Sound check (`scripts\sound_check.bat`, 22 instruments + string/choir alternatives): all fine, current GM programs kept.
   - App (test 1, A minor): confirm, generate (31 parts, checker clean), playback with loop/tempo/mute/solo, piano roll,
@@ -42,15 +51,34 @@
 - Diminished 7ths are named from the bass note (symmetrical chord): B–D–F–G# with B lowest reads *Bdim7 · ii°7*, not *vii°65*. The alternatives and typed correction cover it.
 - Corrections only last while the app is open. Saving them is part of projects (Milestone 6).
 - Melody and bass files: the reader exists and is tested, but there are no UI slots yet. They are first used in Milestone 5.
-- Generator speed: up to ~2 s for 16 bars on the build machine; the generator tests take ~90 s of the test run. Fine for now; if
-  Milestone 4's three alternatives make Generate feel slow, cache candidates per chord and share them between A/B/C.
+- Ensemble edits: per-project player counts (SPEC §4 "counts editable per project") are covered by the Forces slider and Parts…
+  on/off for now; exact counts per instrument come with projects.
+- Generator speed: all three alternatives for 16 bars take about 1.8 s in the background. The test run is about 3 minutes, most
+  of it the generator sweeps. If it gets slower, cache candidates per chord and share them between A/B/C.
+- Allowed parallel warnings (never errors), all expected:
+  - Follow input copies parallel 5ths or octaves between your clip's top and bass, and each one is
+    reported once per pair of doubling parts.
+  - Keep-as-is: model parts doubling your kept notes by pitch class aren't linked to them (only to your
+    bass), so their parallels show.
+  - C on test 12 (power chords) at Forces Solo or Density 3–4.
+- Your own edits can break rules: a swap can give the choir a leap of more than an octave, and a kept
+  voicing can have its own rule problems. The cells turn red, and generated output itself never has
+  errors. Keep-as-is notes outside the strings' playable range (below E1) are kept and flagged red.
+- Swaps link parts per chord (`Part.doubles_at`). Regenerating anything (all, a part, a chord) bakes swaps in: the alternative's
+  "origin" is reset and swap_leap flags go away.
+- "Regenerate this part" makes the part an independent line. A later *Regenerate unlocked* puts it back into its doubling role
+  unless it is locked.
 - Approach A sometimes puts two upper voices in unison (e.g. horns 3 and 4) - allowed and needed for power chords in the choir, but
   scored as a small cost. Tenor trombone 2 and bassoon 1 only play when there is an open 5th (root-position chords with a perfect 5th)
   and rest otherwise.
 - Tuba is in the low octave except on E chords (E1 is below its comfortable F1), where it plays E2 with the cellos.
-- Out of scope, noted for later: A/B/C tabs, lock, regenerate one part/chord, swap, undo, top-voice option, keep-as-is, sliders,
-  presets (Milestone 4); rhythm patterns, re-strike-every-bar toggle, melody/bass slots, moderate mode (Milestone 5); combined
-  divisi file, full-score type-1 file, projects (Milestone 6).
+- Out of scope, noted for later:
+  - Milestone 5: rhythm patterns, the re-strike-every-bar toggle, melody/bass slots, moderate mode (the
+    Character slider is shown locked at Safe), per-section sliders, per-part role overrides, and roles and
+    patterns in presets.
+  - Milestone 6: the combined divisi file, the full-score type-1 file, projects (they also save locks,
+    swaps and corrections; undo history only lasts while the app is open).
+  - Not yet built: keep-as-is in other sections (only strings for now) and the SSAATTBB choir layout.
 - Sam's real Ableton export isn't in the automated tests yet (the round trip was checked by hand). Add one Ableton-exported `.mid` to `tests/data/ableton/` when convenient.
 - `Documents\OrchSketch` is both the Git repo and where the app writes `Exports\`, `Projects\` and `logs\` (git-ignored). Consider moving the repo to its own folder before v1.0.
 
@@ -96,16 +124,56 @@
 - **Export names:** `{clip file name}_{Part}_A.mid` until projects exist (Milestone 6); part codes are `Line.export`
   (Fl1, Hn1, Vln1-a, Cb, ChS...).
 
+- **Milestone 4 decisions (Sam):** keep-as-is spreads the input over string lines, one note per line (not one polyphonic part).
+  User edits that break a rule are kept and flagged red, with Ctrl+Z to undo. Forces and Density wait for Generate (the button
+  turns orange); Dynamics applies at once. Locks are per alternative.
+- **Milestone 4 decisions (Claude's calls):**
+  - *Generate* keeps each tab's locked parts. *Regenerate unlocked* works on the current tab only, uses a
+    new variation (seed "seed.variation") and is pushed away from the current notes.
+  - A swap keeps locked parts. *Use own voicing* restores the unswapped original.
+  - Swap leap flag: a leap of 8 or more semitones (more than a perfect 5th) that is bigger than before the
+    swap (`swap_leap` in rules.json, `min_semitones`).
+  - Follow input matches the clip's top note's pitch class, in the octave nearest to it inside the
+    approach's window.
+  - Low and heavy = violas, cellos, basses, tenor and bass trombones, tuba, contrabassoon, men's choir (T, B).
+  - Forces Solo uses one player per instrument, with solo-string GM sounds 40–43 for audition. Divisi
+    splits Violins II, violas and cellos (cellos b take the open 5th).
+  - Density keeps the k most important lines per voice in the approach's lead order (k = 1, 2, 3, 5,
+    all). The choir plays as a whole, and each section is kept without gaps.
+  - A line written an octave up needs a same-section partner within an octave below, or it drops down.
+  - Ensembles with fewer than three upper voices spread their upper lines over three voices.
+- **Approach parameters** (generator.py `A`, `B`, `C`):
+  - Upper-voice windows: A C3–F5, B C3–G5, C G3–C6.
+  - Targets: centre, span, bass range; B adds a minimum span of 17, C a top pull.
+  - Parallel cost: A 8 (as in Milestone 3), B and C 16.
+  - Each approach has its own octave and rest table and lead order.
+
 ## Notes for the next chat
-- Milestone 4: add approaches B (wide and full) and C (high and bright) as new line tables + scoring targets next to `LINES_A` /
-  `_vertical_cost` in `generator.py`, and tabs A/B/C in the window. `generate()` already takes `seed` and an `Ensemble`;
-  presets will replace the section checkboxes. Lock/regenerate can reuse the per-chord candidate lists (`_candidates`) and
-  Viterbi with locked lines fixed.
-- The window's dialogs go through `MainWindow.notify` / `open_folder` / `show_menu` and the player through
-  `player_factory`, so UI tests never open a popup or audio. Keep it that way.
+- Milestone 5:
+  - **Patterns:** they go after the path search (SPEC §5 step 5). The checker already follows each part's
+    top note and checks parallels at chord changes only.
+  - **Moderate mode:** it needs `_candidates` to allow 9ths, sus and 6ths in upper voices, and `generate()`
+    to accept mode="moderate". The Character slider is already in the window, disabled.
+  - **Per-section sliders:** they can feed `Ensemble` per section. Density and Forces are applied in
+    `approach_lines()` / `ensemble_lines()`.
+  - **Melody and bass slots:** a melody line can be added as a fixed part (`_Fixed`, the way keep-as-is
+    and locks work).
+- **Data model:**
+  - Each `Orchestration` has `cells` (pitch per line per chord) plus `meta`: "labels" (voice label per
+    line per chord, used for the doubling links), "voices" (abstract voicing), "sources" (approach per
+    chord), "origin" (the unswapped original), "fixed", "model", "free", "settings" and "variation".
+  - Edits never change an orchestration in place; undo relies on that.
+- **Test conventions:** `tests/test_generator.py` sweeps A (snapshot), B and C over every section
+  combination, every preset and Forces × Density samples, so any new approach or option should pass the
+  same sweeps. If A is ever changed on purpose, rerun `tests/make_a_snapshot.py` and say so in the changelog.
+- The window's dialogs go through `MainWindow.notify` / `open_folder` / `show_menu` / `ask_text`, and the
+  player goes through `player_factory`, so UI tests never open a popup or audio. Keep it that way. Tests
+  set `run_async = False`, and `wait_for_generation()` waits for a background Generate.
 - `tests/test_generator.py` sweeps every section combination; any new approach should pass the same sweep.
 - Windows workflow: edit in the cloud workspace, pack a uniquely named `.tgz` into `_sync\`, unpack it in the linked folder, and
   copy over the files (deletes aren't allowed there, so `tar` can't overwrite; `cp` can). Ask Sam to run `scripts\run_tests.bat`
-  and read `test_results.txt`. The linked folder must be `Documents\OrchSketch` (one chat was linked to an old
-  Downloads copy by mistake; check `get_device_info` first).
+  and read `test_results.txt`. The linked folder must be `Documents\OrchSketch`. The Milestone 4 chat was linked to
+  `Downloads\DocumentsDevOrchSketch` (an old copy) again and asked for `Documents\OrchSketch` with `device_request_folder_access`;
+  check `get_device_info` first. Claude's workspace can run the whole suite (pip install mido pytest PySide6==6.12.*;
+  QT_QPA_PLATFORM=offscreen), so iterate there and only sync when it's green.
 - UI tests must never open a real popup or dialog (they block offscreen). Route them through replaceable methods like `MainWindow.show_menu`.

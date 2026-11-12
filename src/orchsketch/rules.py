@@ -17,7 +17,7 @@ ERROR, WARNING = "error", "warning"
 SAFE, MODERATE = "safe", "moderate"
 CHECK_IDS = (
     "playable_range", "comfortable_range", "defining_tone", "low_interval", "spacing",
-    "choir_crossing", "choir_leap", "parallels", "choir_parallels", "doubled_outer", "melody_clash",
+    "choir_crossing", "choir_leap", "parallels", "choir_parallels", "doubled_outer", "melody_clash", "swap_leap",
 )
 
 
@@ -39,6 +39,7 @@ class Rules:
     melody_clash: frozenset[int]
     choir_order: tuple[str, ...]
     checks: dict[str, CheckDef]
+    swap_leap_min: int = 8  # a swap is flagged when it makes a leap of at least this many semitones bigger
 
     def severity(self, check: str, mode: str = MODERATE) -> str:
         c = self.checks[check]
@@ -70,6 +71,7 @@ def parse_rules(raw: dict, name: str = "rules.json") -> Rules:
             melody_clash=frozenset(int(x) for x in raw["melody_clash_semitones"]),
             choir_order=tuple(raw["choir_order"]),
             checks=checks,
+            swap_leap_min=int(raw["checks"].get("swap_leap", {}).get("min_semitones", 8)),
         )
     except (KeyError, TypeError, ValueError) as exc:
         if isinstance(exc, DataError):

@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "about": "Ensemble presets (SPEC §6). instruments: ids from data/instruments. forces: solo / section / divisi. density: 1 (sparse) to 5 (full). dynamics: pp p mp mf f ff. Roles and patterns join the presets in Milestone 5.",
+  "presets": [
+    {"id": "strings_only", "name": "Strings only",
+     "instruments": ["violins_1", "violins_2", "violas", "cellos", "basses"],
+     "forces": "section", "density": 5, "dynamics": "mf"},
+    {"id": "strings_horns", "name": "Strings + horns",
+     "instruments": ["violins_1", "violins_2", "violas", "cellos", "basses", "horn"],
+     "forces": "section", "density": 5, "dynamics": "mf"},
+    {"id": "brass_choir", "name": "Brass + choir",
+     "instruments": ["horn", "trumpet", "tenor_trombone", "bass_trombone", "tuba",
+                     "choir_soprano", "choir_alto", "choir_tenor", "choir_bass"],
+     "forces": "section", "density": 5, "dynamics": "f"},
+    {"id": "full_epic", "name": "Full epic",
+     "instruments": ["piccolo", "flute", "oboe", "english_horn", "clarinet", "bass_clarinet", "bassoon",
+                     "contrabassoon", "horn", "trumpet", "tenor_trombone", "bass_trombone", "tuba",
+                     "violins_1", "violins_2", "violas", "cellos", "basses",
+                     "choir_soprano", "choir_alto", "choir_tenor", "choir_bass"],
+     "forces": "section", "density": 5, "dynamics": "mf"},
+    {"id": "woodwinds_strings_soft", "name": "Woodwinds + strings (soft)",
+     "instruments": ["flute", "oboe", "english_horn", "clarinet", "bass_clarinet", "bassoon",
+                     "violins_1", "violins_2", "violas", "cellos", "basses"],
+     "forces": "section", "density": 3, "dynamics": "p"},
+    {"id": "low_heavy", "name": "Low and heavy",
+     "instruments": ["violas", "cellos", "basses", "tenor_trombone", "bass_trombone", "tuba", "contrabassoon",
+                     "choir_tenor", "choir_bass"],
+     "forces": "section", "density": 5, "dynamics": "f"}
+  ]
+}

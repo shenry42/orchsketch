@@ -1,8 +1,11 @@
 """Orchestration grid (SPEC §6, item 3) and piano-roll preview (item 5).
 
-One row per part, one column per chord. Each cell shows the part's note (Ableton names by default);
-a note held over from the previous identical chord shows "~". Yellow text = outside comfortable range,
-red cell = a rule error (should never appear). Each row has mute, solo and a drag handle for export.
+One row per sounding (or locked) part, one column per chord. Each cell shows the part's note (Ableton names
+by default); a note held over from the previous identical chord shows "~". Yellow text = outside
+comfortable range, red cell = a rule error (only after your own edits), orange cell = a checker warning
+(hover for the reason). Each row has lock, mute, solo and a drag handle for export. Click a chord header
+for the chord menu (regenerate, swap); right-click a row for the part menu (lock, regenerate this part).
+A header like "Am · B" means that chord uses alternative B's voicing.
 """
 from __future__ import annotations
 
@@ -20,7 +23,9 @@ from .theme import MUTED, PANEL, TEXT
 SECTION_TINT = {"woodwinds": "#26302a", "brass": "#332c22", "strings": "#232b36", "choir": "#2f2636"}
 YELLOW = "#e6c84f"
 RED_BG = "#5a2323"
-CTRL_COLS = 3  # mute, solo, drag
+WARN_BG = "#4d3b1c"
+LOCK_COLOR = "#5b9bd5"
+CTRL_COLS = 4  # lock, mute, solo, drag
 
 
 class DragHandle(QLabel):
@@ -60,6 +65,9 @@ class PartGrid(QTableWidget):
     part_selected = Signal(str)
     mute_toggled = Signal(str, bool)
     solo_toggled = Signal(str, bool)
+    lock_toggled = Signal(str, bool)
+    chord_menu_requested = Signal(int)  # chord index
+    part_menu_requested = Signal(str, int)  # line id, chord index (-1 = row header)
 
     def __init__(self, files_for_part):
         super().__init__()
@@ -67,6 +75,10 @@ class PartGrid(QTableWidget):
         self.line_ids: list[str] = []
         self.mute_buttons: dict[str, QToolButton] = {}
         self.solo_buttons: dict[str, QToolButton] = {}
+        self.lock_buttons: dict[str, QToolButton] = {}
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._context_menu)
+        self.horizontalHeader().sectionClicked.connect(self._header_clicked)
         self.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -80,7 +92,7 @@ class PartGrid(QTableWidget):
     def clear_grid(self, message: str = "Confirm the chords, then press Generate."):
         self.clear()
         self.line_ids = []
-        self.mute_buttons, self.solo_buttons = {}, {}
+        self.mute_buttons, self.solo_buttons, self.lock_buttons = {}, {}, {}
         self.setRowCount(1)
         self.setColumnCount(1)
         self.horizontalHeader().hide()
@@ -90,27 +102,35 @@ class PartGrid(QTableWidget):
         self.setItem(0, 0, item)
         self.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
 
-    def _button(self, text, tip, line_id, signal, color):
+    def _button(self, text, tip, line_id, signal, color, checked=False):
         b = QToolButton()
         b.setText(text)
         b.setCheckable(True)
+        b.setChecked(checked)
         b.setToolTip(tip)
         b.setStyleSheet(f"QToolButton {{ padding: 0 4px; }} QToolButton:checked {{ background: {color}; color: #111; }}")
         b.toggled.connect(lambda on, lid=line_id: signal.emit(lid, on))
         return b
 
-    def show_orchestration(self, orch, key: Key, name_style: str = "ableton"):
+    def show_orchestration(self, orch, key: Key, name_style: str = "ableton", locked=frozenset()):
         insts = instruments()
         self.clear()
         self.horizontalHeader().show()
         self.verticalHeader().show()
         chords = orch.chords
-        self.line_ids = [ln.id for ln in orch.lines]
-        self.setRowCount(len(orch.lines))
+        lines = [ln for ln in orch.lines if ln.id in locked or any(p is not None for p in orch.cells[ln.id])]
+        self.line_ids = [ln.id for ln in lines]
+        self.setRowCount(len(lines))
         self.setColumnCount(CTRL_COLS + len(chords))
-        heads = ["M", "S", "⠿"] + [c.label.symbol(key) for c in chords]
+        sources = orch.sources
+        heads = ["L", "M", "S", "⠿"] + [c.label.symbol(key) + (f" · {src}" if src != orch.approach else "")
+                                        for c, src in zip(chords, sources)]
         self.setHorizontalHeaderLabels(heads)
-        self.setVerticalHeaderLabels([ln.label for ln in orch.lines])
+        for i in range(len(chords)):
+            self.horizontalHeaderItem(CTRL_COLS + i).setToolTip(
+                "Click for this chord's menu: regenerate it, or use another alternative's voicing"
+                + (f" (now: alternative {sources[i]}'s voicing)" if sources[i] != orch.approach else ""))
+        self.setVerticalHeaderLabels([("🔒 " if ln.id in locked else "") + ln.label for ln in lines])
         hh = self.horizontalHeader()
         for c in range(CTRL_COLS):
             hh.setSectionResizeMode(c, QHeaderView.Fixed)
@@ -120,21 +140,29 @@ class PartGrid(QTableWidget):
             hh.setSectionResizeMode(CTRL_COLS + i, QHeaderView.Interactive)
         self._fit_columns()
         errors = {(pid, i.chord) for i in orch.report.errors for pid in i.parts}
-        self.mute_buttons, self.solo_buttons = {}, {}
-        for r, ln in enumerate(orch.lines):
+        notes_for: dict[tuple, list[str]] = {}
+        for issue in orch.report.issues:
+            for pid in issue.parts:
+                notes_for.setdefault((pid, issue.chord), []).append(issue.message)
+        warn = {(pid, i.chord) for i in orch.report.warnings for pid in i.parts}
+        self.mute_buttons, self.solo_buttons, self.lock_buttons = {}, {}, {}
+        for r, ln in enumerate(lines):
             inst = insts[ln.instrument]
             tint = QColor(SECTION_TINT[inst.section])
+            lk = self._button("L", "Lock this part: Regenerate keeps its notes", ln.id, self.lock_toggled,
+                              LOCK_COLOR, checked=ln.id in locked)
             m = self._button("M", "Mute this part", ln.id, self.mute_toggled, "#e0a040")
             s = self._button("S", "Solo this part", ln.id, self.solo_toggled, "#60c060")
-            self.mute_buttons[ln.id], self.solo_buttons[ln.id] = m, s
-            self.setCellWidget(r, 0, m)
-            self.setCellWidget(r, 1, s)
+            self.lock_buttons[ln.id], self.mute_buttons[ln.id], self.solo_buttons[ln.id] = lk, m, s
+            self.setCellWidget(r, 0, lk)
+            self.setCellWidget(r, 1, m)
+            self.setCellWidget(r, 2, s)
             has_notes = bool(orch.part(ln.id).notes)
             handle = DragHandle(lambda lid=ln.id: self.files_for_part(lid),
                                 tip=f"Drag {ln.label} into Ableton" if has_notes else "This part rests throughout")
             if not has_notes:
                 handle.setEnabled(False)
-            self.setCellWidget(r, 2, handle)
+            self.setCellWidget(r, 3, handle)
             cells = orch.cells[ln.id]
             for i, p in enumerate(cells):
                 held = (i > 0 and p is not None and cells[i - 1] == p and chords[i - 1].label == chords[i].label
@@ -142,7 +170,8 @@ class PartGrid(QTableWidget):
                 text = "–" if p is None else ("~ " if held else "") + note_name(p, name_style, key)
                 item = QTableWidgetItem(text)
                 item.setTextAlignment(Qt.AlignCenter)
-                item.setBackground(QBrush(QColor(RED_BG) if (ln.id, i) in errors else tint))
+                bg = RED_BG if (ln.id, i) in errors else (WARN_BG if (ln.id, i) in warn else None)
+                item.setBackground(QBrush(QColor(bg) if bg else tint))
                 if p is None:
                     item.setForeground(QBrush(QColor(MUTED)))
                 elif not inst.is_comfortable(p):
@@ -155,8 +184,32 @@ class PartGrid(QTableWidget):
                     regs = inst.register_notes(p)
                     if regs:
                         tip += f" · {regs[0]}"
+                for msg in notes_for.get((ln.id, i), []):
+                    tip += "\n" + msg
                 item.setToolTip(tip)
                 self.setItem(r, CTRL_COLS + i, item)
+
+    def set_locked(self, line_id: str, on: bool, label: str):
+        """Update a row's lock mark without rebuilding the grid."""
+        if line_id in self.line_ids:
+            r = self.line_ids.index(line_id)
+            self.setVerticalHeaderItem(r, QTableWidgetItem(("🔒 " if on else "") + label))
+            b = self.lock_buttons.get(line_id)
+            if b is not None and b.isChecked() != on:
+                b.blockSignals(True)
+                b.setChecked(on)
+                b.blockSignals(False)
+
+    def _header_clicked(self, col: int):
+        if col >= CTRL_COLS and self.line_ids:
+            self.chord_menu_requested.emit(col - CTRL_COLS)
+
+    def _context_menu(self, pos):
+        idx = self.indexAt(pos)
+        if not idx.isValid() or not self.line_ids or idx.row() >= len(self.line_ids):
+            return
+        col = idx.column() - CTRL_COLS
+        self.part_menu_requested.emit(self.line_ids[idx.row()], col if col >= 0 else -1)
 
     def _fit_columns(self):
         """Chord columns share the free width in proportion to chord length (at least 58 px each)."""
