@@ -7,9 +7,10 @@
 - **Version:** v1.1
 - **Last milestone completed:** 6 — Finish (v1.0), plus the **second benchmark (v1.1): pass** — Sam's 10
   progressions, see below.
-- **Next:** Phase 2 (SPEC §11), Sam to choose the first items.
+- **Next:** Phase 2, Milestone 7 — v1.2 Pattern engine (SPEC §14). Phase 2 is planned: decisions, guardrails and
+  milestones 7–12 are in SPEC §14.
 - **Repo:** https://github.com/shenry42/orchsketch
-- **Last updated:** 2026-11-12 (v1.1, second benchmark)
+- **Last updated:** 2026-11-12 (Phase 2 planned; no code changes since v1.1)
 
 ## Milestones
 - [x] 1 — v0.1 Read and label (+ packaging spike, audio test with Ableton open)
@@ -19,6 +20,15 @@
 - [x] 5 — v0.5 Motion (patterns, bass, melody, moderate mode, per-section sliders)
 - [x] 6 — v1.0 Finish (projects, full export, .exe, full test-set pass, Ableton check)
 - [x] v1.1 — Second benchmark (SPEC §8): Sam's 10 progressions
+
+### Phase 2 — Composition (SPEC §14)
+- [ ] 7 — v1.2 Pattern engine (pattern data files, shape-preserving ostinato + note-mode control, accent groupings,
+  pattern A/B/C, parallels inside patterns, Phase 2 ear-test set, speed cache)
+- [ ] 8 — v1.3 Textures and shapes (intensity shapes, arpeggios, stabs, phrase-end fills, unison themes, pulse beds)
+- [ ] 9 — v1.4 Expression (CC1/CC11 curves, swells, tremolo part, risers, velocity shaping + humanize)
+- [ ] 10 — v1.5 Lines (imitation, runs, pickups, rips/falls, simple bass, countermelody engine, targeted placement)
+- [ ] 11 — v1.6 Control (pedal instrument, role overrides, choir override, player counts, keep-as-is, SSAATTBB, repo move)
+- [ ] 12 — v2.0 AI line writer (Claude API, button only, checker-validated)
 
 ## Test results (latest run)
 - Automated tests (v1.1): 0 failed. Claude's workspace: 461 passed, 1 skipped in 10:24 (music21 not installed
@@ -329,11 +339,17 @@
 - **Line ending note:** `.bat` files must be CRLF (the build/test scripts check it).
 
 ## Notes for the next chat
-- v1.1 is done (second benchmark passed). Next steps (Sam to choose):
-  - Benchmark re-run after any change: `scripts\benchmark.bat` (builds `Projects\Benchmark\`).
-  - Phase 2 (SPEC §11): countermelodies, more and richer patterns (ideas under Known issues), keyswitches,
-    CC1/CC11 curves; requests: pedal-tone instrument choice, per-part role overrides.
-  - Housekeeping: move the repo out of `Documents\OrchSketch`.
+- v1.1 is done (second benchmark passed). **Phase 2 is planned in SPEC §14** (2026-11-12): start with
+  Milestone 7, v1.2 Pattern engine. The research behind it (44 ranked ideas, sources, build-order diagram) is
+  the Claude Doc *OrchSketch Phase 2 — Ranked Feature Research*: https://claude.ai/artifact/3FppXiZGQNhVj13gn5DwZX
+  - Key Phase 2 decisions (details in SPEC §14): ostinato note mode is a per-section control (Chord tones by
+    default, Hybrid, Scale steps); patterns and lines get their own A/B/C after the harmony A/B/C; with every
+    new option at its default, the A and v0.4 snapshots must still pass; the checker checks only the
+    endpoints of runs, pickups, rips and falls; generation for 16 bars stays at about 4 s or less.
+  - Start Milestone 7 by adding the Phase 2 ear-test cases to the benchmark and profiling the generator, then
+    move the six v1 patterns into the new data format with identical output before adding anything new.
+  - Benchmark re-run after any generator change: `scripts\benchmark.bat` (builds `Projects\Benchmark\`).
+  - Housekeeping (Milestone 11): move the repo out of `Documents\OrchSketch`.
 - **Projects:** `project.py` + `MainWindow.to_project()` / `open_project()`. Any new window state that should
   persist needs a field in `EditState` and `project.Project` (same name); old files fill in its default.
 - **Packaged app:** `scripts\build_exe.bat` (PyInstaller folder build; entry `scripts/orchsketch_main.py`).

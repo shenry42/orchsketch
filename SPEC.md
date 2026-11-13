@@ -1,6 +1,6 @@
 # Orchestral Composition Assistant — v1 Build Spec
 
-Nov 12, 2026 · @Sam · updated after v1.0
+Nov 12, 2026 · @Sam · updated after v1.1 (Phase 2 plan added, §14)
 
 V1 is a standalone Windows app. It takes a block-chord MIDI file, labels the harmony, and generates 3 orchestrations for strings, brass, woodwinds and choir that stay in range and are rule-checked. You audition them with a light SoundFont and export them as MIDI to drag into Ableton. It is for personal use only. Accuracy beats novelty in v1.
 
@@ -18,8 +18,8 @@ V1 is a standalone Windows app. It takes a block-chord MIDI file, labels the har
 | Use case | Sketching from a chord progression | Composition and full arrangement |
 | Style | Epic cinematic, modern orchestra leaning slightly hybrid | Traditional plus experimental |
 | Intelligence | Deterministic music theory and orchestration rules only | Hybrid with AI |
-| AI | Deferred to a later phase. Online is acceptable then | Phase 4 |
-| Network | Fully offline in v1 | — |
+| AI | Deferred in v1. Phase 2 adds an optional AI line writer (Claude API, online, button only); see §14 | Phase 4 |
+| Network | Fully offline in v1. From Phase 2 only the optional AI line writer goes online | — |
 | Builder | Claude writes all code. Sam tests, mostly inside the app | — |
 | Backups | GitHub repo plus source zip per version, version numbers, changelog | Version control |
 | Working name | OrchSketch (rename anytime) | — |
@@ -295,7 +295,7 @@ Each milestone ends with a working build, a version tag, a changelog entry, a Gi
 
 The following are left out: the AI assistant; keyswitches and CC1/CC11 curves (the constant CC1 per part is in); harp, piano, timpani and percussion; key changes, other time signatures and tempo changes; arpeggiated or broken input; automatic key detection and modal labeling; the half-time toggle; wild mode; VST3 and Max for Live; training on reference datasets (OpenScore, IMSLP, etc., which move to Phase 2 for tuning); and notation export.
 
-**Later phases (unchanged order):** 2 Composition (countermelodies, more patterns, keyswitches, CC curves) · 3 Arrangement (entrances and exits, timeline) · 4 AI assistant (online allowed) · 5 Expansion (harp, piano, timpani, percussion engine).
+**Later phases (unchanged order):** 2 Composition (planned in §14: patterns, textures, CC curves, lines, control items, AI line writer) · 3 Arrangement (entrances and exits, timeline) · 4 AI assistant (online allowed) · 5 Expansion (harp, piano, timpani, percussion engine).
 
 ## 12. Open items
 
@@ -311,6 +311,68 @@ Each milestone is built in its own fresh chat, starting from three files: `SPEC.
 
 1. Export this doc as Markdown and save it as `SPEC.md` in the repo root, next to `STATUS.md`.
 2. Open a new chat per milestone. Attach `SPEC.md`, `STATUS.md` and the repo link or latest source zip.
-3. Kickoff message: *"Build Milestone N per SPEC.md. STATUS.md has the current state. Update STATUS.md and CHANGELOG.md when done."*
+3. Kickoff message: *"Build Milestone N per SPEC.md. STATUS.md has the current state. Update STATUS.md and CHANGELOG.md when done."* Phase 2 milestones (7–12) are defined in §14.
 4. The milestone ends with an updated `STATUS.md`, which becomes the next chat's starting point.
 5. If the spec changes, edit this doc and re-export `SPEC.md`. Never patch the copy in a chat.
+
+## 14. Phase 2 — Composition (v1.2 to v2.0)
+
+Decided 2026-11-12 after a research and brainstorm round (Claude Doc *OrchSketch Phase 2 — Ranked Feature Research*: https://claude.ai/artifact/3FppXiZGQNhVj13gn5DwZX, which holds the 44 ranked ideas, sources and reasoning). Phase 2 targets the hand work Sam still does after export: rewriting rhythms/patterns and adding lines (countermelodies, runs, bass). The exported MIDI ends up as the final, polished part, so it must sound finished, not just correct.
+
+**Guardrails (all Phase 2 milestones)**
+
+- A/B/C plus the sliders stay the main way to work. New features are new options, not a new workflow.
+- Generation stays fast: all three alternatives for 16 bars, patterns and lines included, in about 4 s or less (now 2–3 s). Profile each new generator.
+- Defaults reproduce v1.1: with every new option at its default, the A and v0.4 snapshots and every existing sweep pass unchanged. Generated output keeps 0 checker errors and 0 must-pass warnings.
+- Re-run `scripts\benchmark.bat` after generator changes and log ear-test scores in `tests/ratings.csv`.
+- Still deterministic and seeded. The one exception is the optional AI line writer (milestone 12), which runs only on a button press.
+
+**Decisions**
+
+| Topic | Decision |
+| --- | --- |
+| Ostinato note mode | A three-position control per section: **Chord tones** (default; every note is a chord-tone slot, always consonant) · **Hybrid** (strong-beat notes snap to chord tones, notes in between follow the scale) · **Scale steps** (the whole contour moves by scale steps from the nearest chord tone; most melodic). |
+| A/B/C for patterns and lines | Two steps. Sam picks the harmony A/B/C first, then patterns and lines get their own A/B/C on top of it (lock/regenerate work as now). |
+| Countermelody target | The melody file; with no melody file, the chord top voice. |
+| Counter vs top voice | Separate registers: the counter sits an octave or more from the line it counters, or in another section. Thin (rest or re-octave) a top-voice note only where they would still collide. |
+| Counter instrument | Chosen by melody register: a high melody puts the counter in horns, then cellos; a low melody puts it in violins, then flute. Sam can pick the instrument (milestone 10 placement). |
+| Checker on runs, pickups, rips, falls, trills | Endpoints only: notes stay in range and in the scale (or the target chord's scale on the last beat before a hit), and the run lands on a chord tone on the beat. Parallels and clash checks are skipped for the notes in between. |
+| Articulations | Sam rarely switches articulations: one patch per exported file. Tremolo goes out as its own part. No shorts/longs split. Keyswitches are low priority (optional, later). |
+| Builds | Preset intensity shapes and phrase-end fills only; no drawn curves, no inferred fills. |
+| AI | Pulled forward into Phase 2 for writing lines only. Online via the Claude API (Anthropic Python SDK + Sam's API key); per-use cost is fine. Runs only when Sam presses its button; its output is validated by the checker and retried; rules-only stays the offline default. |
+| Choir melody override | When the choir carries the melody and can't voice around it, the choir bass rests; its notes are covered by cellos/basses, switched on automatically if they are off. Upper choir voices carry melody and harmony. |
+| Bass | Simple is enough: sustained roots, repeated 1/4 or 1/8 roots, octave variants. Synth wobble is done in Ableton. |
+
+**Not in Phase 2 (Sam's call):** display spelling, larger chord vocabulary and the melody-outside-key hint; input limits (16 bars, 4/4, key changes, 1/8 grid); drum or rhythm-clip import; better audition sounds or live MIDI into Ableton; a hybrid synth section (later phase); drawn intensity curves; tutti hits/braams as a separate texture; motif development and fix-my-line; AI for ranking, text instructions or taste learning.
+
+**Milestones.** Each one ends like v1: working build, tag, changelog, push, source zip, updated STATUS.md. Numbers in brackets are ranks in the research doc.
+
+7. **v1.2 — Pattern engine.**
+   - Patterns, accent groupings and shapes stored as data (JSON) so new ones need no engine code [2]. The six v1 patterns move into this format and render exactly as before.
+   - Shape-preserving ostinato engine: a pattern is a contour + rhythm; at each chord change it keeps its shape and remaps its notes using the section's note mode (Chord tones / Hybrid / Scale steps) [1].
+   - Accent groupings (velocity and note-length) such as 3+3+2, 3+3+3+3+2+2, 4+4+3+3+2, per section [3].
+   - Pattern A/B/C (the second step of the two-step choice).
+   - Checker: parallels checked inside patterns, not only at chord changes [5].
+   - Phase 2 ear-test set added to the benchmark before building [4]; voicing-candidate cache and profiling [15].
+8. **v1.3 — Textures and shapes.**
+   - Intensity shape presets per bar: steady, build, swell, drop, build-and-hit, 4-bar phrase, breakdown (strip to 1–2 parts, then return) [6, 32]. Shapes drive density, forces, pattern and dynamics over the clip.
+   - Arpeggio/broken-chord patterns: up, down, up-down, root–5th–octave–10th, rolling, range-aware [7].
+   - Hits and stabs: syncopated stab rhythms, downbeat hits with rests around them, anticipations (an 8th early) [8].
+   - Phrase-end fills on the last beat(s) of every 4 or 8 bars: 16th fill, drop-out before the downbeat, pickup into the next phrase [9].
+   - Unison/octave theme mode: melody (or chord top voice) doubled in octaves across horns, low brass, cellos and choir instead of voiced [10].
+   - Pulse-bed builder: a preset that adds a layer every 4 bars [11].
+   - If time allows: pattern families per approach [23], pads under ostinatos [24], accents on chord changes [25], interlocking two-section 16ths [27], reference preset packs [31].
+9. **v1.4 — Expression.**
+   - CC1 and CC11 curves per part: swell per chord, crescendo/diminuendo over a phrase, following the intensity shape; winds and brass get one CC11 arc per phrase [12]. Replaces the constant CC1 when switched on.
+   - Swells into the next chord or downbeat [13]; tremolo exported as its own part (e.g. "Vln I trem") [14]; risers over 1–4 bars into a hit, with an optional Shepard-style layered version [21].
+   - Velocity shaping (phrase arcs, beat accents) and seeded humanize of timing and velocity [26].
+10. **v1.5 — Lines.**
+   - Imitation/echo: a melody fragment a beat or bar later in another instrument, fitted to the chords [17].
+   - Runs into phrase starts, landing accented on the downbeat (octave runs in flutes/clarinets, string runs in violins) [18]; chord-change pickups of 2–4 notes [20]; decorating sustains (trills, ripples) [28]; brass rips and falls written as notes [29].
+   - Simple bass patterns, and the fix for basses/tuba/contrabassoon resting on notes they can't reach [19].
+   - Countermelody engine with four styles: answers in the gaps, contrary motion, rhythmic counterline, imitation. Counterpoint rules: prefer contrary and oblique motion, no parallel 5ths/octaves against its target, dissonances approached and left by step [16].
+   - Targeted placement: select bars + an instrument and generate a line only there, with its own A/B/C [22].
+11. **v1.6 — Control.** Pedal-tone instrument choice [33]; per-part role overrides and roles in presets [34]; choir melody override [35]; exact player counts [36]; keep-as-is outside the strings [37]; SSAATTBB layout [40]; move the repo to its own folder, e.g. `Documents\OrchSketch-dev` [42].
+12. **v2.0 — AI line writer.** A button that asks the Claude API for a counter, run or melody line over the current harmony, validates it with the checker (including the line rules from milestone 10), retries on failure and offers the results as A/B/C. Key stored locally, never in the repo or project files. Without network or key the button explains why and nothing else changes [38].
+
+**Parked (ranked low; pick up later if wanted):** cross-rhythm triplet layer [30]; chopped chords and orchestral CC11 pumping [39]; root-note bass export for synths [41]; a local AI music model [43]; keyswitches per library [44].
