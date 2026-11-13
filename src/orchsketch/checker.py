@@ -183,7 +183,7 @@ class _Links:
 
 
 class _Checker:
-    def __init__(self, parts, chords, key, mode, rules, insts, style):
+    def __init__(self, parts, chords, key, mode, rules, insts, style, inside=True):
         ids = [p.id for p in parts]
         if len(set(ids)) != len(ids):
             raise ValueError("part ids must be unique")
@@ -198,6 +198,7 @@ class _Checker:
         self.rules: Rules = rules
         self.inst: dict[str, Instrument] = insts
         self.style = style
+        self.inside = inside
         self.links = _Links(self.parts)
         self._local = any(p.doubles_at is not None for p in self.parts)
         self._links_at: dict[int, _Links] = {}
@@ -430,6 +431,45 @@ class _Checker:
                              f"{self.pname(pb)} ({self.n(b1)}→{self.n(b2)}) into {self.where(s2.start, i + 1)}.",
                              [pa, pb], i + 1, s2.start, [a1, a2, b1, b2])
 
+    def check_parallels_inside(self):
+        """Parallel 5ths/8ves inside a chord (rhythm patterns, melody and bass files): between two parts'
+        consecutive common attacks, both moving the same way into the same 5th or octave. Two parts playing the
+        same notes in octaves at every common attack of the chord are one doubled line, not two (SPEC §5b allows
+        doubling). Reported once per pair of parts per chord; the chord changes are check_parallels'."""
+        for i, span in enumerate(self.chords):
+            onsets = {}
+            for p in self.parts:
+                tops: dict[int, int] = {}
+                for nt in p.notes:
+                    if span.start <= nt.start < span.end:
+                        tops[nt.start] = max(tops.get(nt.start, -1), nt.pitch)
+                if len(tops) > 1 and len(set(tops.values())) > 1:
+                    onsets[p.id] = tops
+            ids = [p.id for p in self.parts if p.id in onsets]
+            for x in range(len(ids)):
+                for y in range(x + 1, len(ids)):
+                    pa, pb = ids[x], ids[y]
+                    ta, tb = onsets[pa], onsets[pb]
+                    common = sorted(ta.keys() & tb.keys())
+                    if all(ta[t] % 12 == tb[t] % 12 for t in common):
+                        continue  # one line doubled at the octave (the same shape on the same notes)
+                    for t1, t2 in zip(common, common[1:]):
+                        a1, a2, b1, b2 = ta[t1], ta[t2], tb[t1], tb[t2]
+                        if a1 == a2 or b1 == b2 or (a2 - a1 > 0) != (b2 - b1 > 0):
+                            continue
+                        iv1, iv2 = abs(a1 - b1) % 12, abs(a2 - b2) % 12
+                        if iv1 != iv2 or iv1 not in (0, 7):
+                            continue
+                        both_choir = all(self.inst[self.by_id[q].instrument].section == "choir" for q in (pa, pb))
+                        if not both_choir and self.linked_at(pa, pb, i):
+                            break
+                        kind = "5ths" if iv1 == 7 else "octaves/unisons"
+                        self.add("choir_parallels" if both_choir else "pattern_parallels",
+                                 f"Parallel {kind} inside the chord: {self.pname(pa)} ({self.n(a1)}→{self.n(a2)}) "
+                                 f"and {self.pname(pb)} ({self.n(b1)}→{self.n(b2)}) at {self.where(t2, i)}.",
+                                 [pa, pb], i, t2, [a1, a2, b1, b2])
+                        break  # once per pair and chord
+
     def check_doubled_outer(self):
         lt = (self.key.tonic_pc + 11) % 12
         for i, span in enumerate(self.chords):
@@ -461,15 +501,20 @@ class _Checker:
                              dedupe=(i, outer))
 
     def check_melody_clash(self):
+        clash = self.rules.melody_clash
         for m in self.parts:
             if m.role != "melody":
                 continue
+            # other parts' notes by pitch (v1.2 speed-up; same order of reports as before)
+            others = [p for p in self.parts
+                      if p.id != m.id and p.role != "melody" and not self.links.linked(p.id, m.id)]
+            pitches = {nt.pitch for p in others for nt in p.notes}
             for mn in m.notes:
-                for p in self.parts:
-                    if p.id == m.id or p.role == "melody" or self.links.linked(p.id, m.id):
-                        continue
+                if not any(mn.pitch + d in pitches or mn.pitch - d in pitches for d in clash):
+                    continue
+                for p in others:
                     for nt in p.notes:
-                        if nt.start < mn.end and nt.end > mn.start and abs(nt.pitch - mn.pitch) in self.rules.melody_clash:
+                        if nt.start < mn.end and nt.end > mn.start and abs(nt.pitch - mn.pitch) in clash:
                             t = max(nt.start, mn.start)
                             c = self.chord_at(t)
                             self.add("melody_clash",
@@ -484,6 +529,8 @@ class _Checker:
         self.check_vertical(self.slices())
         self.check_choir_leaps()
         self.check_parallels()
+        if self.inside:
+            self.check_parallels_inside()
         self.check_doubled_outer()
         self.check_melody_clash()
         return Report(self.issues)
@@ -491,9 +538,10 @@ class _Checker:
 
 def check(parts: list[Part], chords: list[ChordSpan], key: Key, mode: str = SAFE, *,
           rules: Rules | None = None, instruments: dict[str, Instrument] | None = None,
-          name_style: str = "ableton") -> Report:
-    """Run every SPEC §7 check. `mode` is "safe" or "moderate"."""
+          name_style: str = "ableton", inside: bool = True) -> Report:
+    """Run every SPEC §7 check. `mode` is "safe" or "moderate". inside=False skips the parallels inside chords
+    (the generator's chord-by-chord pattern checks, which only look for errors and must-pass warnings)."""
     if mode not in (SAFE, "moderate"):
         raise ValueError(f"mode must be safe or moderate, not {mode!r}")
     return _Checker(parts, chords, key, mode, rules or builtin_rules(),
-                    instruments or builtin_instruments(), name_style).run()
+                    instruments or builtin_instruments(), name_style, inside).run()

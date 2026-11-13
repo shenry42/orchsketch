@@ -8,6 +8,9 @@ and listen to A, B and C.
 
 With --benchmark it does the same for the second benchmark (SPEC §8): your own progressions in
 tests\data\benchmark\, saved to Documents\OrchSketch\Projects\Benchmark\, report benchmark_report.txt.
+Then (v1.2) the Phase 2 ear-test set (SPEC §14, tests\data\phase2_ear_tests.json): each progression with the
+v1.1 baseline and three pattern-engine setups, plus pattern alternatives 2 and 3 on two of them, saved to
+Documents\OrchSketch\Projects\Benchmark\Phase2\ and added to the same report, with generation times.
 A chord expected as "unrecognized" must come out unrecognized and is then typed in by hand, as you would
 (its "correct_to" symbol), before Confirm all.
 
@@ -35,6 +38,8 @@ REPORT = ROOT / "testset_report.txt"
 BENCHMARK_DATA = DATA / "benchmark"
 BENCHMARK = Path.home() / "Documents" / "OrchSketch" / "Projects" / "Benchmark"
 BENCHMARK_REPORT = ROOT / "benchmark_report.txt"
+PHASE2 = BENCHMARK / "Phase2"
+PHASE2_SET = DATA / "phase2_ear_tests.json"
 _APP = None  # the off-screen QApplication
 
 
@@ -51,7 +56,36 @@ def project_stem(exp_path: Path, with_files: bool) -> str:
     return exp_path.name.split(".")[0] + ("_melody_bass" if with_files else "")
 
 
-def run_one(exp_path: Path, with_files: bool, folder: Path) -> tuple[bool, list[str]]:
+def phase2_runs() -> list[dict]:
+    """The Phase 2 ear-test cases: (case id, expected file, files?, setup, pattern alternative)."""
+    doc = json.loads(PHASE2_SET.read_text(encoding="utf-8"))
+    out = []
+    for prog in doc["progressions"]:
+        for sid, setup in doc["setups"].items():
+            out.append(dict(id=f"{prog['id']}{sid}", exp=DATA / prog["expected"], files=prog["files"], setup=setup,
+                            ptab=0))
+            if sid == "a" and prog.get("pattern_alts"):
+                for k in (1, 2):
+                    out.append(dict(id=f"{prog['id']}a{k + 1}", exp=DATA / prog["expected"], files=prog["files"],
+                                    setup=dict(setup, name=f"{setup['name']}, pattern alternative {k + 1}"),
+                                    ptab=k))
+    return out
+
+
+def _configure(setup: dict):
+    def go(w):
+        for sec, vals in setup.get("sections", {}).items():
+            w.set_scope(sec)
+            for key, v in vals.items():
+                w._slider_moved(key, v)
+        w.set_scope("all")
+    return go
+
+
+def run_one(exp_path: Path, with_files: bool, folder: Path, *, stem: str | None = None, configure=None,
+            ptab: int = 0, title: str | None = None) -> tuple[bool, list[str]]:
+    import time
+
     data = exp_path.parent
     from PySide6.QtCore import QSettings
 
@@ -63,8 +97,8 @@ def run_one(exp_path: Path, with_files: bool, folder: Path) -> tuple[bool, list[
     from orchsketch.ui.main_window import MainWindow
 
     exp = json.loads(exp_path.read_text(encoding="utf-8"))
-    stem = project_stem(exp_path, with_files)
-    lines = [f"Test {str(exp['test']):>2}{' + melody and bass files' if with_files else ''}  ({exp['file']}, "
+    stem = stem or project_stem(exp_path, with_files)
+    lines = [title or f"Test {str(exp['test']):>2}{' + melody and bass files' if with_files else ''}  ({exp['file']}, "
              f"{exp['key']['tonic']} {exp['key']['mode']}, {exp['bars']} bars)"]
     ok = True
     notes: list = []
@@ -108,10 +142,23 @@ def run_one(exp_path: Path, with_files: bool, folder: Path) -> tuple[bool, list[
         if with_files:
             assert w.load_part_file("melody", data / exp["melody_file"])
             assert w.load_part_file("bass", data / exp["bass_file"])
+        if configure is not None:
+            configure(w)
+        t = time.perf_counter()
         w.generate()
+        t_gen = time.perf_counter() - t
+        t = time.perf_counter()
+        if ptab:
+            w.set_pattern_tab(ptab)
+        t_pat = time.perf_counter() - t
+        lines.append(f"  Generate A/B/C: {t_gen:.1f} s" + (f", pattern alternative {ptab + 1}: {t_pat:.2f} s"
+                                                         if ptab else ""))
         insts, rl = instruments(), rules()
-        for i, alt in enumerate("ABC"):
-            o = w.alts[i]
+        from orchsketch import pattern_alts as pa
+        shown = [(i, alt, w.alts[i]) for i, alt in enumerate("ABC")]
+        if ptab:
+            shown.append((0, f"A{ptab + 1}", w.orch))
+        for i, alt, o in shown:
             if not isinstance(o, Orchestration):
                 ok = False
                 lines.append(f"  {alt}: FAIL - not built: {o}")
@@ -133,13 +180,19 @@ def run_one(exp_path: Path, with_files: bool, folder: Path) -> tuple[bool, list[
                          f"own files, {len(o.report.warnings)} warnings"
                          + (f", outside playable: {', '.join(out_of_range[:5])}" if out_of_range else ""))
             lines.append(f"     {o.reason}")
+            if pa.describe(o):
+                lines.append(f"     Patterns: {pa.describe(o)}")
             for x in must:
                 lines.append(f"     ! {x.message}")
         path = w.save_project()
         reopened = pj.load(path)
-        same = all((not isinstance(a, Orchestration) and a == b) or
-                   (isinstance(a, Orchestration) and [p.notes for p in a.parts] == [p.notes for p in b.parts])
-                   for a, b in zip(w.alts, reopened.alts))
+        def same_notes(a, b):
+            return ((not isinstance(a, Orchestration) and a == b) or
+                    (isinstance(a, Orchestration) and isinstance(b, Orchestration)
+                     and [p.notes for p in a.parts] == [p.notes for p in b.parts]))
+        same = all(same_notes(a, b) for a, b in zip(w.alts, reopened.alts))
+        same &= all(same_notes(a, b) for ra, rb in zip(w.palts, reopened.palts) for a, b in zip(ra, rb))
+        same &= tuple(w.ptabs) == tuple(reopened.ptabs)
         ok &= same
         lines.append(f"  Project: {path.name} ({path.stat().st_size // 1024} KB), "
                      f"{'reopens with the same notes' if same else 'FAIL - reopened notes differ'}")
@@ -152,8 +205,30 @@ def run_one(exp_path: Path, with_files: bool, folder: Path) -> tuple[bool, list[
     return ok, lines
 
 
+def phase2(only: list[str] | None = None, folder: Path = PHASE2) -> tuple[int, int, list[str]]:
+    """The Phase 2 ear-test projects. Returns (passed, total, report lines)."""
+    folder.mkdir(parents=True, exist_ok=True)
+    out = ["Phase 2 ear-test set (SPEC §14, tests\\data\\phase2_ear_tests.json). Projects: " + str(folder),
+           "Rate each project's shown alternative (A, or A2/A3) from 1 to 5; compare with the baseline (a).", ""]
+    passed = total = 0
+    for case in phase2_runs():
+        if only and case["id"] not in only:
+            continue
+        exp = json.loads(case["exp"].read_text(encoding="utf-8"))
+        name = f"{case['id']}_{str(exp['test'])}" + ("_files" if case["files"] else "")
+        title = (f"{case['id']}: test {exp['test']}{' + melody and bass files' if case['files'] else ''} "
+                 f"({exp['file']}, {exp['key']['tonic']} {exp['key']['mode']}) - {case['setup']['name']}")
+        ok, lines = run_one(case["exp"], case["files"], folder, stem=name, configure=_configure(case["setup"]),
+                            ptab=case["ptab"], title=title)
+        total += 1
+        passed += ok
+        out += lines + [""]
+        print(lines[0], "-", "pass" if ok else "FAIL", flush=True)
+    return passed, total, out
+
+
 def main(only: list[str] | None = None, folder: Path = TESTSET, report: Path | None = REPORT,
-         data: Path = DATA) -> bool:
+         data: Path = DATA, with_phase2: bool = False) -> bool:
     from PySide6.QtWidgets import QApplication
 
     from orchsketch import __version__
@@ -172,8 +247,14 @@ def main(only: list[str] | None = None, folder: Path = TESTSET, report: Path | N
         passed += ok
         out += lines + [""]
         print(lines[0], "-", "pass" if ok else "FAIL", flush=True)
+    if with_phase2:
+        p2, t2, lines = phase2()
+        out += lines
+        passed += p2
+        total += t2
     out.append(f"AUTOMATIC CHECKS: {passed}/{total} runs pass" + ("  -> OK" if passed == total else "  -> FAIL"))
-    out.append("Next: the ear test. Open each project in the app and score A, B and C from 1 to 5.")
+    out.append("Next: the ear test. Open each project in the app and score A, B and C from 1 to 5"
+               + (" (Phase2: the shown alternative)." if with_phase2 else "."))
     if report is not None:
         report.write_text("\n".join(out) + "\n", encoding="utf-8")
     return passed == total
@@ -183,7 +264,7 @@ if __name__ == "__main__":
     args = sys.argv[1:]
     if "--benchmark" in args:
         args.remove("--benchmark")
-        ok = main(args or None, folder=BENCHMARK, report=BENCHMARK_REPORT, data=BENCHMARK_DATA)
+        ok = main(args or None, folder=BENCHMARK, report=BENCHMARK_REPORT, data=BENCHMARK_DATA, with_phase2=True)
     else:
         ok = main(args or None)
     sys.exit(0 if ok else 1)

@@ -1,0 +1,22 @@
+{
+  "id": "8ths_rise",
+  "name": "8ths rising 1-2-3-2",
+  "short": "8ths 1232",
+  "order": 10,
+  "family": "8ths",
+  "kind": "grid",
+  "step": "8th",
+  "accents": [
+    0,
+    8
+  ],
+  "contour": [
+    0,
+    1,
+    2,
+    1
+  ],
+  "end_on_anchor": true,
+  "choir": false,
+  "description": "8ths climbing two steps above the part's note and back."
+}

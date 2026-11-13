@@ -1,0 +1,24 @@
+{
+  "id": "16ths_pendulum",
+  "name": "16ths pendulum",
+  "short": "16ths pend",
+  "order": 21,
+  "family": "16ths",
+  "kind": "grid",
+  "step": "16th",
+  "accents": [
+    0,
+    4,
+    8,
+    12
+  ],
+  "contour": [
+    0,
+    -1,
+    0,
+    1
+  ],
+  "end_on_anchor": true,
+  "choir": false,
+  "description": "16ths swinging a step below and above the part's note."
+}

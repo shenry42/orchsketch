@@ -1,0 +1,24 @@
+{
+  "id": "16ths_fall",
+  "name": "16ths falling 1-7-6-7",
+  "short": "16ths fall",
+  "order": 23,
+  "family": "16ths",
+  "kind": "grid",
+  "step": "16th",
+  "accents": [
+    0,
+    4,
+    8,
+    12
+  ],
+  "contour": [
+    0,
+    -1,
+    -2,
+    -1
+  ],
+  "end_on_anchor": true,
+  "choir": false,
+  "description": "16ths dropping two steps below the part's note and back."
+}

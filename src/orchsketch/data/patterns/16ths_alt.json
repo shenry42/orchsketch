@@ -1,0 +1,24 @@
+{
+  "id": "16ths_alt",
+  "name": "16ths alternating",
+  "short": "16ths alt",
+  "order": 3,
+  "family": "16ths",
+  "kind": "grid",
+  "step": "16th",
+  "accents": [
+    0,
+    4,
+    8,
+    12
+  ],
+  "contour": [
+    0,
+    -1
+  ],
+  "min_step": 3,
+  "end_on_anchor": true,
+  "passing": true,
+  "choir": false,
+  "description": "16ths alternating the part's note with the next chord tone below."
+}

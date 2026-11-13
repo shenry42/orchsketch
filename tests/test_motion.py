@@ -26,7 +26,7 @@ from test_generator import COMBOS, EXPECTED, SLIDER_SAMPLE, load, must_fix
 
 DATA = Path(__file__).parent / "data"
 WITH_FILES = [e for e in EXPECTED if json.loads(e.read_text(encoding="utf-8")).get("melody_file")]
-PATTERNS = pat.PATTERNS[1:]
+PATTERNS = pat.V1_PATTERNS[1:]  # the v1 sweeps (Milestone 7 patterns: tests/test_pattern_engine.py)
 
 
 def files_for(exp):

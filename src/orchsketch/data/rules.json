@@ -41,6 +41,7 @@
     "choir_parallels":  {"severity": "error",   "generator_must_pass": true,  "label": "Parallel 5ths/8ves within the choir"},
     "doubled_outer":    {"severity": "warning", "generator_must_pass": true,  "label": "Doubled leading tone or 7th in an outer voice"},
     "melody_clash":     {"severity": "warning", "generator_must_pass": false, "label": "Melody note clashes with a harmony note a minor 2nd away"},
-    "swap_leap":        {"severity": "warning", "generator_must_pass": false, "label": "Leap made bigger by a per-chord swap", "min_semitones": 8}
+    "swap_leap":        {"severity": "warning", "generator_must_pass": false, "label": "Leap made bigger by a per-chord swap", "min_semitones": 8},
+    "pattern_parallels": {"severity": "warning", "generator_must_pass": false, "label": "Parallel 5ths/8ves inside a chord (patterns, melody/bass files)"}
   }
 }

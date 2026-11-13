@@ -1,0 +1,24 @@
+{
+  "id": "16ths_rise",
+  "name": "16ths rising 1-2-3-4",
+  "short": "16ths 1234",
+  "order": 20,
+  "family": "16ths",
+  "kind": "grid",
+  "step": "16th",
+  "accents": [
+    0,
+    4,
+    8,
+    12
+  ],
+  "contour": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "end_on_anchor": true,
+  "choir": false,
+  "description": "16ths climbing three steps on every beat."
+}

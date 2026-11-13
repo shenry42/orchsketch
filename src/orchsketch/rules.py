@@ -18,6 +18,7 @@ SAFE, MODERATE = "safe", "moderate"
 CHECK_IDS = (
     "playable_range", "comfortable_range", "defining_tone", "low_interval", "spacing",
     "choir_crossing", "choir_leap", "parallels", "choir_parallels", "doubled_outer", "melody_clash", "swap_leap",
+    "pattern_parallels",
 )
 
 

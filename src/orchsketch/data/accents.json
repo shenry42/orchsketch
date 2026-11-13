@@ -1,0 +1,80 @@
+{
+  "groupings": [
+    {
+      "id": "3+3+2",
+      "name": "3+3+2",
+      "unit": "8th",
+      "groups": [
+        3,
+        3,
+        2
+      ],
+      "gate": 1.0
+    },
+    {
+      "id": "3+3+2 short",
+      "name": "3+3+2, short off-accents",
+      "unit": "8th",
+      "groups": [
+        3,
+        3,
+        2
+      ],
+      "gate": 0.5
+    },
+    {
+      "id": "3+3+3+3+2+2",
+      "name": "3+3+3+3+2+2",
+      "unit": "16th",
+      "groups": [
+        3,
+        3,
+        3,
+        3,
+        2,
+        2
+      ],
+      "gate": 1.0
+    },
+    {
+      "id": "3+3+3+3+2+2 short",
+      "name": "3+3+3+3+2+2, short off-accents",
+      "unit": "16th",
+      "groups": [
+        3,
+        3,
+        3,
+        3,
+        2,
+        2
+      ],
+      "gate": 0.5
+    },
+    {
+      "id": "4+4+3+3+2",
+      "name": "4+4+3+3+2",
+      "unit": "16th",
+      "groups": [
+        4,
+        4,
+        3,
+        3,
+        2
+      ],
+      "gate": 1.0
+    },
+    {
+      "id": "4+4+3+3+2 short",
+      "name": "4+4+3+3+2, short off-accents",
+      "unit": "16th",
+      "groups": [
+        4,
+        4,
+        3,
+        3,
+        2
+      ],
+      "gate": 0.5
+    }
+  ]
+}

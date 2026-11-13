@@ -2,6 +2,60 @@
 
 All notable changes to OrchSketch. Versions follow the milestones in SPEC.md §10.
 
+## v1.2 — Pattern engine (Phase 2, Milestone 7) — 2026-11-13
+
+### Added
+- **Patterns as data.** Every rhythm pattern is a JSON file in `src/orchsketch/data/patterns/` (rhythm,
+  accents, a contour of steps, octave shifts, choir/passing-tone flags, family), and accent groupings are in
+  `data/accents.json`. A new pattern is a new file, no engine code. The six v1 patterns moved into this
+  format and render exactly as in v1.1.
+- **Shape-preserving ostinatos.** A pattern's contour keeps its shape at every chord change and remaps its
+  notes to the new chord. Every pattern still strikes the part's own voiced note at the chord change, and
+  shaped patterns end each chord on it, so the harmony and the chord-change rules stay exactly the voicing
+  search's. Nine new patterns: 8ths rising 1-2-3-2, 8ths octave pulse, 8ths 3+3+2 lift, gallop, 16ths
+  rising 1-2-3-4, 16ths pendulum, 16ths broken 1-3-2-3, 16ths falling, 3+3+2 pulse.
+- **Note mode per section** (side panel): Chord tones (default), Hybrid (notes on a beat or accent snap to
+  chord tones, the rest follow the chord's scale) and Scale steps (the chord's scale = the key's scale with
+  the chord's own tones put in, spelled by the key: G# for G in E major in A minor, Ab for A in Fm in
+  C major). Allowed in Safe mode too (Sam's call). Range: a step that doesn't fit is mirrored, else the
+  part's own note plays.
+- **Accent groupings per section** (side panel): 3+3+2, 3+3+3+3+2+2, 4+4+3+3+2, each also as "short
+  off-accents" (velocity and note length). "Pattern's own" (default) keeps the pattern's accents.
+- **Pattern alternatives 1/2/3** on top of each harmony alternative (a second tab row, *Regenerate
+  patterns*). 1 is exactly your settings; 2 and 3 pick another pattern of the same family (8ths, 16ths,
+  pulse) and/or accent grouping per section, seeded; of 4 candidates the one with the fewest parallels
+  wins. Only render settings change (`Settings.part_variants`), so the notes at every chord change stay
+  the harmony's and switching is instant. Locked parts keep their pattern on Regenerate patterns, which
+  steers away from the last 8 results. Harmony edits keep the pattern choices. Undo/redo covers it.
+  Exports are named `_A2.mid`, `_A3.mid` (pattern 1 keeps `_A.mid`). Projects save patterns 2 and 3 and
+  the shown tab (old projects open unchanged).
+- **Checker: parallels inside patterns** (`pattern_parallels`, a warning): parallel 5ths/8ves between two
+  independent parts' consecutive common attacks inside a chord (patterns, melody and bass files), once per
+  pair and chord. Two parts on the same notes in octaves count as one doubled line. Within the choir it is
+  `choir_parallels` (an error). The generator's own chord-by-chord checks leave it out, so v1.1's notes
+  are unchanged; v1.1's alternating 16ths now show some of these warnings (Sam's call: report, don't fix).
+- **Phase 2 ear-test set** (`tests/data/phase2_ear_tests.json`): tests 1, 4, 8, 11 (+ files), B01
+  (+ files) and B10, each as the v1.1 baseline and three pattern-engine setups, plus pattern alternatives 2
+  and 3 on tests 1 and B10 (28 projects). `scripts\benchmark.bat` builds them in
+  `Projects\Benchmark\Phase2\`, checks them and writes the generation times into `benchmark_report.txt`.
+- Ear test (Sam, `tests/ratings.csv` P1a–P6d, harmony B × patterns 1/2/3): 84 scores, all 3–5. Best setup:
+  8ths rising + 3+3+2 in chord tones (mean 4.8 vs baseline 4.3); Scale steps' pattern 3 lowest (3.5).
+- `scripts\commit_docs.bat`: commits SPEC.md and STATUS.md on their own (used for the Phase 2 plan).
+- Tests: `tests/test_patterns.py` (v1 patterns note for note against a frozen copy of v1.1's renderer,
+  pattern files, groupings, note modes) and `tests/test_pattern_engine.py` (the v1.1 pattern snapshot, new
+  patterns × note modes × accents sweeps, files and moderate, the checker, pattern alternatives, export
+  names, speed, the window and projects). `tests/data/v11_patterns_snapshot.json` (450 runs, made on
+  v1.1 with `tests/make_v11_pattern_snapshot.py`) locks v1.1's patterned notes; its full run is `slow`.
+
+### Changed
+- The pattern safety net: a part in Hybrid/Scale steps first falls back to chord tones, then to Sustain;
+  it also uses chord tones at a chord where its scale notes would clash a minor 2nd with the melody. The
+  fallback loop now runs until the chord is clean (it used to stop after 4 rounds).
+- Speed: the rendering's small checks are remembered by content (shared by every re-render and pattern
+  alternative), the search's fixed-part lookups are cached, and the melody-clash check indexes notes by
+  pitch. The heaviest case (test 11 + files, moderate, Full epic) is about 20% faster than v1.1.
+- `tests/test_motion.py` sweeps the six v1 patterns (`pat.V1_PATTERNS`); the new ones have their own sweeps.
+
 ## v1.1 — Second benchmark (SPEC §8) — 2026-11-12
 
 ### Added

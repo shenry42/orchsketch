@@ -1,0 +1,10 @@
+{
+  "id": "sustain",
+  "name": "Sustain",
+  "short": "",
+  "order": 0,
+  "family": "sustain",
+  "kind": "sustain",
+  "choir": true,
+  "description": "Notes held for the chord's length."
+}

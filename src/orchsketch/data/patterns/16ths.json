@@ -1,0 +1,21 @@
+{
+  "id": "16ths",
+  "name": "16th ostinato",
+  "short": "16ths",
+  "order": 2,
+  "family": "16ths",
+  "kind": "grid",
+  "step": "16th",
+  "accents": [
+    0,
+    4,
+    8,
+    12
+  ],
+  "contour": [
+    0
+  ],
+  "passing": true,
+  "choir": false,
+  "description": "Repeated 16ths, accented on every beat."
+}

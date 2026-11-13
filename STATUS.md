@@ -4,13 +4,12 @@
 > The chat that finishes a milestone updates this file before it ends.
 
 ## Current state
-- **Version:** v1.1
-- **Last milestone completed:** 6 — Finish (v1.0), plus the **second benchmark (v1.1): pass** — Sam's 10
-  progressions, see below.
-- **Next:** Phase 2, Milestone 7 — v1.2 Pattern engine (SPEC §14). Phase 2 is planned: decisions, guardrails and
-  milestones 7–12 are in SPEC §14.
+- **Version:** v1.2
+- **Last milestone completed:** 7 — Pattern engine (v1.2, Phase 2). Before it: 6 — Finish (v1.0) and the
+  second benchmark (v1.1).
+- **Next:** Phase 2, Milestone 8 — v1.3 Textures and shapes (SPEC §14).
 - **Repo:** https://github.com/shenry42/orchsketch
-- **Last updated:** 2026-11-12 (Phase 2 planned; no code changes since v1.1)
+- **Last updated:** 2026-11-13 (Milestone 7 done)
 
 ## Milestones
 - [x] 1 — v0.1 Read and label (+ packaging spike, audio test with Ableton open)
@@ -22,7 +21,7 @@
 - [x] v1.1 — Second benchmark (SPEC §8): Sam's 10 progressions
 
 ### Phase 2 — Composition (SPEC §14)
-- [ ] 7 — v1.2 Pattern engine (pattern data files, shape-preserving ostinato + note-mode control, accent groupings,
+- [x] 7 — v1.2 Pattern engine (pattern data files, shape-preserving ostinato + note-mode control, accent groupings,
   pattern A/B/C, parallels inside patterns, Phase 2 ear-test set, speed cache)
 - [ ] 8 — v1.3 Textures and shapes (intensity shapes, arpeggios, stabs, phrase-end fills, unison themes, pulse beds)
 - [ ] 9 — v1.4 Expression (CC1/CC11 curves, swells, tremolo part, risers, velocity shaping + humanize)
@@ -31,6 +30,40 @@
 - [ ] 12 — v2.0 AI line writer (Claude API, button only, checker-validated)
 
 ## Test results (latest run)
+- **Milestone 7 (v1.2):**
+  - Automated tests: Claude's workspace 502 passed, 1 skipped in 14:41 (music21 not installed there), slow
+    sweeps included. Windows `run_tests.bat` (Sam, 2026-11-13): 425 passed, 89 deselected (`slow`) in 7:27.
+  - **v1.1 unchanged:** the A and v0.4 snapshots and every v1 sweep pass as before, and the new
+    `tests/data/v11_patterns_snapshot.json` (450 runs made on tag v1.1: the six v1 patterns as master, per
+    section and per instrument, Full epic and Low and heavy, moderate passing tones, re-strike, per-section
+    dynamics, melody and bass files) gives exactly v1.1's notes. The v1 renderer is also compared note for
+    note with a frozen copy of v1.1's `patterns.py`.
+  - New sweeps, all with 0 errors and 0 `generator_must_pass` warnings, cells unchanged, every chord struck on
+    the voiced note: the 9 new patterns rotated over the sections × the 3 note modes on all 12 files × A/B/C
+    (`slow`; a sample runs in the quick suite), every accent grouping on 8ths/16ths/shaped patterns in Hybrid,
+    tests 1, 4 and 11 with melody + bass + moderate + new patterns, pattern alternatives 2/3 and Regenerate
+    patterns (locks kept, no cycling within 8).
+  - `scripts\benchmark.bat` on Windows: 39/39 runs pass (Sam's 11 benchmark runs + the 28 Phase 2 projects in
+    `Projects\Benchmark\Phase2\`): 0 generator errors, 0 must-pass warnings, nothing outside playable range,
+    projects reopen exactly.
+  - **Ear test** (Sam, 2026-11-13, `tests/ratings.csv` tests P1a…P6d, alternatives B1–B3 = harmony B with
+    patterns 1/2/3; Sam rated on B because A's dense low register hides the rhythm). 84 scores, all 3–5, none
+    "doesn't make musical sense". Means of pattern 1 (the setup as set) over P1–P6: a baseline 4.3,
+    b 8ths rising + 3+3+2 (chord tones) **4.8**, c 16ths pendulum Hybrid 4.2, d 16ths rising Scale steps 4.3.
+    Patterns 2: 4.5–4.7 for every setup; patterns 3: 4.2–4.5, but **d 3.5**. Sam's notes:
+    - b is the most consistently liked; pattern 2 often the best of the three.
+    - "Chaotic / elements clashing" comes almost only with Scale steps (d) and with Hybrid under a melody file
+      (P5c, P5d, P1d, P6d, P2d pattern 3).
+    - Test 11 + files (P4, 16 bars): rhythms hard to make out in every setup (3–4).
+    - Patterns play quietly: Sam had to raise Dynamics to hear them.
+    - P1a/P1a2/P1a3 and P6a/a2/a3 are the same music on harmony B (they differ only in the tab shown on A), so
+      their spread (P1: 4/5/3, 3/4/5, 4/5/5) shows the ear test's noise is about ±1 point.
+  - Speed (Claude's workspace, which is slower than Sam's PC): test 11 + files, moderate, Full epic, all three
+    alternatives 10.6 s at v1.1 → 8.3 s now; Full epic without files 2.3 s (unchanged). One pattern
+    alternative re-renders in 0.05–0.3 s. Sam's PC (`benchmark_report.txt`): 4-bar progressions 0.3–0.6 s,
+    B01 + files (8 bars) 3.0–3.2 s, **test 11 + files (16 bars) 5.0–5.2 s** in every setup including the v1.1
+    baseline, so the patterns add nothing, but this case is over SPEC §14's "about 4 s". Pattern alternative
+    2/3: 0.08–0.09 s.
 - Automated tests (v1.1): 0 failed. Claude's workspace: 461 passed, 1 skipped in 10:24 (music21 not installed
   there), slow sweeps included. `release.bat` runs all of them on Windows before tagging (`test_results.txt`).
 - **Second benchmark (SPEC §8, v1.1): PASS.** Sam's 10 progressions (Ableton exports, 4 bars each, B01 8 bars
@@ -105,7 +138,7 @@
   - App: load, labels, correction, confirm all: pass (after the click fix below).
 
 ## Known issues
-- Checker: melodic checks (leaps, parallels) follow each part's top note, so the generator must give every divisi line its own part (which also matches per-line export). Parallels are checked only at chord changes, not inside rhythm patterns.
+- Checker: melodic checks (leaps, parallels) follow each part's top note, so the generator must give every divisi line its own part (which also matches per-line export). Since v1.2 parallels inside chords are checked too (`pattern_parallels`, a warning; see Decisions).
 - Checker: low-interval limits cover simple intervals only. Compound intervals (9ths, 10ths...) have no limit; revisit if wide low voicings sound muddy.
 - Chords over a non-chord bass show the Roman numeral as numeral + "/bass" (e.g. *Bb/C · VII/C*). Provisional notation; revisit if it reads badly.
 - Diminished 7ths are named from the bass note (symmetrical chord): B–D–F–G# with B lowest reads *Bdim7 · ii°7*, not *vii°65*. The alternatives and typed correction cover it.
@@ -135,12 +168,28 @@
   scored as a small cost. Tenor trombone 2 and bassoon 1 only play when there is an open 5th (root-position chords with a perfect 5th)
   and rest otherwise.
 - Tuba is in the low octave except on E chords (E1 is below its comfortable F1), where it plays E2 with the cellos.
-- Patterns (Sam, v0.5): "fairly generic, room for improvement". More and richer patterns are Phase 2
-  (SPEC §11). Ideas: pattern variations per approach, accents following the harmonic rhythm, ostinato shapes
-  (root–5th–octave), string 16ths on two pitches across sections, and "pad" sustains under ostinatos.
+- Patterns (Sam, v0.5): "fairly generic, room for improvement". Milestone 7 added shapes, note modes, accent
+  groupings and pattern alternatives; more textures (arpeggios, stabs, fills, pads under ostinatos,
+  interlocking 16ths) are Milestone 8.
 - Patterns are checked chord by chord; a pattern falls back to Sustain for a part at a chord where it would
-  break a rule (16ths alternating does this on about 18% of chords). Parallels inside patterns are not checked
-  (only at chord changes).
+  break a rule (16ths alternating does this on about 18% of chords). A Hybrid/Scale steps part first falls
+  back to chord tones. Parallels inside patterns are reported (`pattern_parallels`, warnings) but not avoided
+  by the safety net; pattern alternatives 2/3 pick, of 4 candidates, the one with the fewest.
+- v1.1's 16ths alternating now shows some `pattern_parallels` warnings that were always there (Sam's call:
+  report as warnings; the notes stay v1.1's).
+- Low parts on shaped patterns in Hybrid/Scale steps (e.g. tuba on 8ths 3+3+2 lift) often fall back to chord
+  tones or Sustain because steps in the low register break the low-interval limits. Expected; a per-role
+  pattern choice could come with role overrides (Milestone 11).
+- **Speed:** 16 bars with melody and bass files take about 5 s on Sam's PC (the v1.1 harmony search; v1.2 made
+  it about 20% faster, patterns add nothing). Over SPEC §14's "about 4 s". The next step that would fix it is
+  running A, B and C in parallel processes (about 2.5x; needs `multiprocessing.freeze_support()` in the
+  packaged app) or sharing candidate checks between A/B/C.
+- **Ear-test follow-ups for Milestone 8/9** (Sam, v1.2): patterns are too quiet to hear (unaccented notes at
+  80% of mf; velocity shaping is Milestone 9); approach A's dense low register hides the rhythm; Scale steps
+  and Hybrid under a melody can sound chaotic/clashing (a tighter clash rule or a default of Chord tones for
+  parts near the melody's register); test 11 + files is a busy texture where patterns blur.
+- Pattern alternatives only vary sections that play a pattern. With Sustain everywhere, patterns 2 and 3 are
+  greyed out.
 - Parts that play your melody or bass file keep the file's rhythm; section patterns don't apply to them.
 - A melody plan that can't be voiced falls back quietly (same instrument without doubling, then the next
   instrument); the reason line says what was used. Example: approach A with an octave-up flute doubling
@@ -338,18 +387,64 @@
   - Slash labels follow the lowest note of the clip (B01 Ebadd9/G, B02 A/C#, B04 F/A, B07 Eb/Bb), as SPEC §3.
 - **Line ending note:** `.bat` files must be CRLF (the build/test scripts check it).
 
+- **Milestone 7 decisions (Sam):** Hybrid and Scale steps are allowed in Safe mode (the in-between notes are
+  checked like any note: range, rules, clashes). Parallels inside patterns are reported as warnings, so v1.1's
+  output stays identical. The Phase 2 plan was committed on its own first (`scripts\commit_docs.bat`). The
+  ear-test set includes B10 besides B01. Pattern tabs are 1/2/3, exported as `_A2.mid`, `_A3.mid`.
+- **Milestone 7 decisions (Claude's calls):**
+  - *Pattern files* (`data/patterns/*.json`, one per pattern) and *accent groupings* (`data/accents.json`):
+    format in `patterns.py`'s docstring. Positions are 16ths in the bar. A pattern's first note must be the
+    anchor (the voiced pitch); `end_on_anchor` makes the chord's last note the anchor again, so chord-change
+    rules see exactly the voicing (all new shaped patterns use it).
+  - *Contour steps*: Chord tones = next chord tone (`min_step` semitones away at least; 16ths alternating
+    uses 3, which is v1's rule); Scale steps = next note of the chord's scale; Hybrid = scale, but notes on a
+    beat or an accent snap to the nearest chord tone (a tie goes the contour's way). A step that is out of
+    range is mirrored, an octave shift too, else the anchor plays.
+  - *Chord scale*: the key's natural scale with the chord's tones put in; a chord tone outside it replaces the
+    neighbour it alters, by the key's spelling (sharp → the note below, flat → the note above).
+  - *Accent groupings* restart every bar; on an 8th pattern, groups starting on an off-16th are skipped.
+    "Short" groupings play off-accent notes at half length. Hits patterns (stabs, half-time, gallop, 3+3+2
+    pulse) keep their own accents.
+  - *Safety net levels* per part and chord: 3 note mode + passing tones, 2 note mode, 1 chord tones,
+    0 Sustain (v1's 2/1/0 are 3/2/0). The loop runs until clean (v1 stopped after 4 rounds; every v1.1 case
+    was clean by then, so output is unchanged). A Hybrid/Scale part whose scale notes clash a minor 2nd with
+    the melody uses chord tones at that chord.
+  - *Checker* `pattern_parallels`: consecutive common attacks of two parts inside one chord; once per pair and
+    chord; parts on the same pitch classes at every common attack are one doubled line. Choir pairs report
+    `choir_parallels` (error). The solver's candidate checks and the rendering's window checks run with
+    `inside=False`, so the search and v1.1's output are unchanged.
+  - *Pattern alternatives* (`pattern_alts.py`): per (section, pattern, accent) group of pattern 1, a seeded
+    shuffle of the family's other (pattern, accent) options; pattern 2 takes option 1, pattern 3 option 2;
+    4 candidates (attempts) rendered, fewest `parallels` + `pattern_parallels` wins. Note modes are never
+    varied. Families: 8ths (8ths, 8ths rising, octave pulse, 3+3+2 lift, gallop), 16ths (16ths, alternating,
+    rising, pendulum, broken, falling), pulse (stabs, half-time, 3+3+2 pulse), sustain (none).
+  - *Window*: `self.alts` stay the harmony alternatives (pattern 1); `self.palts[tab]` holds patterns 2/3,
+    built when first shown; `self.orch` is what is shown/played/exported, `self.harmony` what harmony edits
+    use. A harmony edit re-applies the pattern choices (`pa.reapply`); a change to Pattern/Note mode/Accents/
+    Dynamics works patterns 2/3 out again with the same variation, locked parts keeping their choices
+    (`pa.refresh`). Pattern tab switches aren't undo steps (like harmony tab switches). The side panel now
+    scrolls.
+  - *Speed*: `_check_cached` remembers the rendering's window checks by content (40 000 entries, then
+    cleared); `_Fixed` caches its per-chord lookups (`forget()` after the independent bass changes a
+    figure); the melody-clash check skips melody notes with no note a semitone away.
+
 ## Notes for the next chat
-- v1.1 is done (second benchmark passed). **Phase 2 is planned in SPEC §14** (2026-11-12): start with
-  Milestone 7, v1.2 Pattern engine. The research behind it (44 ranked ideas, sources, build-order diagram) is
-  the Claude Doc *OrchSketch Phase 2 — Ranked Feature Research*: https://claude.ai/artifact/3FppXiZGQNhVj13gn5DwZX
-  - Key Phase 2 decisions (details in SPEC §14): ostinato note mode is a per-section control (Chord tones by
-    default, Hybrid, Scale steps); patterns and lines get their own A/B/C after the harmony A/B/C; with every
-    new option at its default, the A and v0.4 snapshots must still pass; the checker checks only the
-    endpoints of runs, pickups, rips and falls; generation for 16 bars stays at about 4 s or less.
-  - Start Milestone 7 by adding the Phase 2 ear-test cases to the benchmark and profiling the generator, then
-    move the six v1 patterns into the new data format with identical output before adding anything new.
-  - Benchmark re-run after any generator change: `scripts\benchmark.bat` (builds `Projects\Benchmark\`).
+- v1.2 (Milestone 7) is done. **Next: Milestone 8, v1.3 Textures and shapes** (SPEC §14). The research behind
+  Phase 2 is the Claude Doc *OrchSketch Phase 2 — Ranked Feature Research*:
+  https://claude.ai/artifact/3FppXiZGQNhVj13gn5DwZX
+  - Milestone 8's arpeggios, stabs/anticipations and phrase-end fills are new pattern files and, where needed,
+    new `kind`s in `patterns.py` (sustain/grid/hits today). Keep the rule that a pattern strikes its anchor
+    at the chord start; anticipations (an 8th early) break it on purpose, so they need their own check path.
+  - Intensity shapes change density/forces/pattern/dynamics per bar: density and forces are generation
+    settings (not render-only), so shapes touch the solver, not only `_render`.
+  - Guardrails: `tests/data/v11_patterns_snapshot.json` + the A and v0.4 snapshots must keep passing with
+    every new option at its default; re-run `scripts\benchmark.bat` (now with the Phase 2 set and times) and
+    log ratings.
   - Housekeeping (Milestone 11): move the repo out of `Documents\OrchSketch`.
+- **Patterns** (v1.2): `patterns.py` (library, groupings, `make_mapper`, `render`), data in `data/patterns/` and
+  `data/accents.json`, generator `_render` (levels, safety net), `pattern_alts.py` (pattern alternatives),
+  checker `check_parallels_inside`. New Settings fields: `note_mode`, `section_note_modes`, `accent`,
+  `section_accents`, `part_variants` (all render-only, in `RENDER_ONLY`).
 - **Projects:** `project.py` + `MainWindow.to_project()` / `open_project()`. Any new window state that should
   persist needs a field in `EditState` and `project.Project` (same name); old files fill in its default.
 - **Packaged app:** `scripts\build_exe.bat` (PyInstaller folder build; entry `scripts/orchsketch_main.py`).

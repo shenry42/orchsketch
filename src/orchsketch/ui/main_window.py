@@ -8,6 +8,9 @@ Milestone 5 adds the melody and bass file slots, rhythm patterns (per section, p
 Milestone 6 adds projects (File > New / Open / Save / Save As, a "*" in the title for unsaved changes, and
 a save prompt before anything is thrown away) and the full export options (per-part files, the full-score
 file or both, plus optional combined divisi files).
+Milestone 7 (v1.2) adds the pattern engine controls: a note mode (Chord tones / Hybrid / Scale steps) and an
+accent grouping per section, and pattern alternatives 1/2/3 on top of each harmony alternative (a second tab
+row, Regenerate patterns; exported as A2, A3...).
 Generation of the three alternatives runs in the background so the window stays responsive.
 """
 from __future__ import annotations
@@ -19,9 +22,9 @@ from pathlib import Path
 from PySide6.QtCore import QPoint, QSettings, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction, QActionGroup, QCursor, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QInputDialog, QLabel,
-    QMainWindow, QMenu, QMessageBox, QPushButton, QSlider, QSpinBox, QSplitter, QTabBar, QTextEdit, QToolButton,
-    QVBoxLayout, QWidget,
+    QApplication, QCheckBox, QComboBox, QFileDialog, QFormLayout, QFrame, QGroupBox, QHBoxLayout, QInputDialog,
+    QLabel, QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea, QSlider, QSpinBox, QSplitter, QTabBar,
+    QTextEdit, QToolButton, QVBoxLayout, QWidget,
 )
 
 from .. import __version__
@@ -31,6 +34,7 @@ from ..edits import bar_chords, regenerate, regenerate_chord, regenerate_part, s
 from .. import project as pj
 from ..export import BOTH, EXPORT_CHOICES, EXPORT_ROOT, FULL, PARTS, export_all, export_folder, export_part, safe_name
 from .. import patterns as pat
+from .. import pattern_alts as pa
 from ..generator import (
     APPROACH, APPROACHES, CHARACTERS, DENSITY_STEPS, DOUBLINGS, DYNAMIC_STEPS, FORCES, MELODY_HOSTS, TOP_INPUT,
     TOP_SMOOTH, Ensemble, GenerationError, Orchestration, Settings, generate_all, rerender,
@@ -54,14 +58,16 @@ DOUBLING_NAMES = {"auto": "Doubling: auto", "off": "Doubling: off", "up": "Doubl
 CUSTOM = "custom"
 ALL = "all"
 SLIDERS = ("character", "forces", "density", "dynamics")
-RENDER_KEYS = ("dynamics", "pattern")  # apply at once, without regenerating
+RENDER_KEYS = ("dynamics", "pattern", "note_mode", "accent")  # apply at once, without regenerating
+NO_PALTS = ((None, None, None),) * 3  # pattern alternatives per harmony tab: (None = pattern 1, 2, 3)
 EXPORT_NAMES = {PARTS: "Per-part files", FULL: "Full score file", BOTH: "Parts + full score"}
 SAVE, DISCARD, CANCEL = "save", "discard", "cancel"
 
 
 def default_values() -> dict:
     return {sec: {"character": "safe", "forces": "section", "density": 5, "dynamics": "mf",
-                  "pattern": pat.SUSTAIN} for sec in SECTIONS}
+                  "pattern": pat.SUSTAIN, "note_mode": pat.CHORD_TONES, "accent": pat.PATTERN_ACCENTS}
+            for sec in SECTIONS}
 
 
 def freeze(d: dict) -> tuple:
@@ -126,6 +132,8 @@ class EditState:
     locks: tuple = (frozenset(), frozenset(), frozenset())
     tab: int = 0
     dirty: bool = False  # generation settings changed since the last Generate
+    palts: tuple = NO_PALTS  # per harmony tab: (None, pattern 2, pattern 3) Orchestration or None (not built)
+    ptabs: tuple = (0, 0, 0)  # per harmony tab: the pattern alternative shown (0 = pattern 1)
     extra: dict = field(default_factory=dict, compare=False, hash=False)
 
 
@@ -142,6 +150,8 @@ class MainWindow(QMainWindow):
         self.alts: list = [None, None, None]
         self.locks: list[frozenset] = [frozenset(), frozenset(), frozenset()]
         self.tab = 0
+        self.palts: list[list] = [[None, None, None] for _ in range(3)]  # per harmony tab: patterns 2 and 3
+        self.ptabs: list[int] = [0, 0, 0]  # per harmony tab: pattern alternative shown (0 = pattern 1)
         self.dirty = False
         self.player: Player | None = None
         self.player_factory = Player  # tests replace this with a silent backend
@@ -330,8 +340,22 @@ class MainWindow(QMainWindow):
         self.reason_label = QLabel("")
         self.reason_label.setStyleSheet(f"color: {MUTED};")
         self.reason_label.setWordWrap(True)
+        self.pattern_tabs = QTabBar()
+        for k in pa.PATTERN_ALTS:
+            self.pattern_tabs.addTab(f"Patterns {k}")
+        self.pattern_tabs.setToolTip("Pattern alternatives on top of this harmony. 1 is exactly your pattern "
+                                     "settings; 2 and 3 pick other patterns and accents from the same families "
+                                     "(the notes at every chord change stay the same).")
+        self.pattern_tabs.currentChanged.connect(self.set_pattern_tab)
+        self.regen_patterns_btn = QPushButton("Regenerate patterns")
+        self.regen_patterns_btn.setToolTip("New pattern choices for this pattern alternative (2 or 3); locked "
+                                           "parts keep theirs")
+        self.regen_patterns_btn.clicked.connect(self.regenerate_patterns_action)
         tabs.addWidget(self.tabs)
         tabs.addWidget(self.regen_btn)
+        tabs.addSpacing(12)
+        tabs.addWidget(self.pattern_tabs)
+        tabs.addWidget(self.regen_patterns_btn)
         tabs.addSpacing(12)
         tabs.addWidget(self.reason_label, 1)
         root.addLayout(tabs)
@@ -353,7 +377,14 @@ class MainWindow(QMainWindow):
         split.setSizes([430, 120, 90])
         middle = QHBoxLayout()
         middle.addWidget(split, 1)
-        middle.addWidget(self._slider_panel())
+        panel = QScrollArea()  # the side panel scrolls on small screens instead of squeezing its rows
+        panel.setWidget(self._slider_panel())
+        panel.setWidgetResizable(True)
+        panel.setFrameShape(QFrame.NoFrame)
+        panel.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        panel.setMaximumWidth(300)
+        panel.setMinimumWidth(300)
+        middle.addWidget(panel)
         root.addLayout(middle, 1)
 
         tr = QHBoxLayout()
@@ -470,19 +501,40 @@ class MainWindow(QMainWindow):
         self.pattern_label = QLabel("")
         self.pattern_label.setStyleSheet(f"color: {MUTED}; font-size: 11px;")
         self.pattern_label.setWordWrap(True)
+        self.pattern_label.setMinimumHeight(30)
         prow = QVBoxLayout()
         prow.addWidget(self.pattern_box)
         prow.addWidget(self.pattern_label)
         pw = QWidget()
         pw.setLayout(prow)
         form.addRow("Pattern", pw)
+        self.note_mode_box = QComboBox()
+        for m in pat.NOTE_MODES:
+            self.note_mode_box.addItem(pat.NOTE_MODE_NAMES[m], m)
+        self.note_mode_box.setToolTip("How a shaped pattern moves (e.g. 8ths rising 1-2-3-2): Chord tones (every "
+                                      "note a chord tone), Hybrid (beats on chord tones, notes in between on the "
+                                      "scale) or Scale steps (the whole shape on the scale). Applies at once.")
+        form.addRow("Note mode", self.note_mode_box)
+        self.accent_box = QComboBox()
+        for a in pat.ACCENTS:
+            self.accent_box.addItem(pat.ACCENT_NAMES[a], a)
+        self.accent_box.setToolTip("Accent grouping for 8th and 16th patterns: the first note of each group is "
+                                   "accented; 'short' also shortens the others. Applies at once.")
+        form.addRow("Accents", self.accent_box)
+        self.mode_label = QLabel("")
+        self.mode_label.setStyleSheet(f"color: {MUTED}; font-size: 11px;")
+        self.mode_label.setWordWrap(True)
+        form.addRow(self.mode_label)
+        self.note_mode_box.activated.connect(
+            lambda _: self._slider_moved("note_mode", self.note_mode_box.currentData()))
+        self.accent_box.activated.connect(lambda _: self._slider_moved("accent", self.accent_box.currentData()))
         self.character.valueChanged.connect(lambda v: self._slider_moved("character", CHARACTERS[v]))
         self.forces.valueChanged.connect(lambda v: self._slider_moved("forces", FORCES[v]))
         self.density.valueChanged.connect(lambda v: self._slider_moved("density", DENSITY_STEPS[v]))
         self.dynamics.valueChanged.connect(lambda v: self._slider_moved("dynamics", DYNAMIC_STEPS[v]))
         self.pattern_box.activated.connect(lambda _: self._slider_moved("pattern", self.pattern_box.currentData()))
-        note = QLabel("Character, Forces and Density take effect at the\nnext Generate. Dynamics and Pattern "
-                      "apply at once.")
+        note = QLabel("Character, Forces and Density take effect at the\nnext Generate. Dynamics, Pattern, "
+                      "Note mode\nand Accents apply at once.")
         note.setStyleSheet(f"color: {MUTED}; font-size: 11px;")
         form.addRow(note)
         box.setMaximumWidth(290)
@@ -559,9 +611,29 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ current alternative
     @property
-    def orch(self) -> Orchestration | None:
+    def harmony(self) -> Orchestration | None:
+        """The current harmony alternative (pattern 1): what harmony edits work on."""
         o = self.alts[self.tab]
         return o if isinstance(o, Orchestration) else None
+
+    @property
+    def orch(self) -> Orchestration | None:
+        """What is shown, played and exported: the harmony alternative with the chosen pattern alternative."""
+        h = self.harmony
+        if h is None:
+            return None
+        k = self.ptabs[self.tab]
+        p = self.palts[self.tab][k] if k else None
+        return p if isinstance(p, Orchestration) else h
+
+    def _ensure_pattern_alt(self, tab: int | None = None):
+        """Build the shown pattern alternative of a tab if it isn't built yet (pattern 2/3, variation 0)."""
+        tab = self.tab if tab is None else tab
+        h, k = self.alts[tab], self.ptabs[tab]
+        if k and isinstance(h, Orchestration) and self.palts[tab][k] is None:
+            row = list(self.palts[tab])
+            row[k] = pa.pattern_alternative(h, k + 1)
+            self.palts[tab] = row
 
     @property
     def approach(self) -> str:
@@ -579,7 +651,10 @@ class MainWindow(QMainWindow):
         """Settings fields that apply at once (no regeneration): dynamics, patterns, re-strike."""
         dyn, sdyn = self._master_and_overrides("dynamics")
         ptn, sptn = self._master_and_overrides("pattern")
+        nm, snm = self._master_and_overrides("note_mode")
+        acc, sacc = self._master_and_overrides("accent")
         return dict(dynamics=dyn, section_dynamics=sdyn, pattern=ptn, section_patterns=sptn,
+                    note_mode=nm, section_note_modes=snm, accent=acc, section_accents=sacc,
                     instrument_patterns=tuple(sorted(self.ipatterns.items())),
                     part_patterns=tuple(sorted(self.ppatterns.items())), restrike_bars=self.restrike_box.isChecked())
 
@@ -614,7 +689,8 @@ class MainWindow(QMainWindow):
                          self.mel_inst_box.currentData(), self.mel_double_box.currentData() or "auto",
                          self.indep_box.isChecked(),
                          self.top_box.currentData(), self.keep_box.isChecked(), self.seed.value(),
-                         tuple(self.alts), tuple(self.locks), self.tab, self.dirty)
+                         tuple(self.alts), tuple(self.locks), self.tab, self.dirty,
+                         tuple(tuple(r) for r in self.palts), tuple(self.ptabs))
 
     def record(self, label: str):
         if not self._restoring:
@@ -638,7 +714,8 @@ class MainWindow(QMainWindow):
         try:
             blocked = (self.tonic, self.mode, self.preset_box, self.forces, self.density, self.dynamics,
                        self.character, self.pattern_box, self.top_box, self.keep_box, self.seed, self.tabs,
-                       self.restrike_box, self.indep_box, self.mel_inst_box, self.mel_double_box)
+                       self.restrike_box, self.indep_box, self.mel_inst_box, self.mel_double_box,
+                       self.note_mode_box, self.accent_box, self.pattern_tabs)
             for w in blocked:
                 w.blockSignals(True)
             self.mode.setCurrentText(st.mode)
@@ -666,6 +743,9 @@ class MainWindow(QMainWindow):
             for w in blocked:
                 w.blockSignals(False)
             self.alts, self.locks, self.tab, self.dirty = list(st.alts), list(st.locks), st.tab, st.dirty
+            self.palts = [list(r) for r in (st.palts or NO_PALTS)]
+            self.ptabs = list(st.ptabs or (0, 0, 0))
+            self.pattern_tabs.setCurrentIndex(self.ptabs[self.tab])
             self._show_current()
         finally:
             self._restoring = False
@@ -983,6 +1063,16 @@ class MainWindow(QMainWindow):
             w.setValue(steps.index(v))
             w.blockSignals(False)
             lab.setText(names[v] + ("  (sections differ)" if mixed else ""))
+        differ = []
+        for key, box, name in (("note_mode", self.note_mode_box, "Note mode"), ("accent", self.accent_box, "Accents")):
+            v, mixed = self._scope_value(key)
+            box.blockSignals(True)
+            box.setCurrentIndex(box.findData(v))
+            box.blockSignals(False)
+            if mixed:
+                differ.append(f"{name}: sections differ")
+        self.mode_label.setText(" · ".join(differ))
+        self.mode_label.setVisible(bool(differ))
         v, mixed = self._scope_value("pattern")
         self.pattern_box.blockSignals(True)
         self.pattern_box.setCurrentIndex(self.pattern_box.findData(v))
@@ -1021,8 +1111,9 @@ class MainWindow(QMainWindow):
                             self.ppatterns.pop(ln.id, None)
         where = "" if self.scope == ALL else f" ({self.scope})"
         name = {"character": "Character", "forces": "Forces", "density": "Density", "dynamics": "Dynamics",
-                "pattern": "Pattern"}[key]
-        shown = pat.PATTERN_NAMES[value] if key == "pattern" else CHARACTER_NAMES.get(value, value)
+                "pattern": "Pattern", "note_mode": "Note mode", "accent": "Accents"}[key]
+        shown = (pat.PATTERN_NAMES[value] if key == "pattern" else pat.NOTE_MODE_NAMES[value] if key == "note_mode"
+                 else pat.ACCENT_NAMES[value] if key == "accent" else CHARACTER_NAMES.get(value, value))
         self._show_scope_values()
         if key in RENDER_KEYS:
             self._apply_render()
@@ -1063,6 +1154,12 @@ class MainWindow(QMainWindow):
         rs = self.render_settings()
         self.alts = [rerender(o, replace(o.settings, **rs)) if isinstance(o, Orchestration) else o
                      for o in self.alts]
+        # patterns 2 and 3 follow the new pattern settings (same variation, locked parts keep their choices)
+        for t, row in enumerate(self.palts):
+            h = self.alts[t]
+            self.palts[t] = [None] + [pa.refresh(p, h, self.locks[t]) if isinstance(p, Orchestration)
+                                      and isinstance(h, Orchestration) else None for p in row[1:]]
+        self._ensure_pattern_alt()
         if self.orch is not None:
             self._show_current()
         if self.orch is not None and self.player is not None and self.player.seq is not None:
@@ -1156,6 +1253,13 @@ class MainWindow(QMainWindow):
             else "Confirm every chord first (Confirm all)")
         for w in (self.play_btn, self.export_parts_btn, self.all_handle, self.regen_btn):
             w.setEnabled(self.orch is not None and not busy)
+        patterned = self.harmony is not None and bool(pa.groups(self.harmony))
+        self.pattern_tabs.setEnabled(self.harmony is not None and not busy)
+        for k in (1, 2):
+            self.pattern_tabs.setTabEnabled(k, patterned or self.ptabs[self.tab] == k)
+        self.pattern_tabs.setTabToolTip(1, "" if patterned else "Give a section a rhythm pattern first")
+        self.pattern_tabs.setTabToolTip(2, "" if patterned else "Give a section a rhythm pattern first")
+        self.regen_patterns_btn.setEnabled(self.orch is not None and not busy and self.ptabs[self.tab] > 0)
         self.strip.show_results(self.session.results if has else [], key, self.selected)
         self.details.setHtml(self._details_html(key))
         for i, a in enumerate(APPROACHES):
@@ -1209,12 +1313,19 @@ class MainWindow(QMainWindow):
 
     def _show_current(self):
         """Show the current tab's alternative in the grid, reason line and checker summary."""
-        o = self.alts[self.tab]
+        self._ensure_pattern_alt()
+        o = self.orch if self.harmony is not None else self.alts[self.tab]
+        if self.pattern_tabs.currentIndex() != self.ptabs[self.tab]:
+            self.pattern_tabs.blockSignals(True)
+            self.pattern_tabs.setCurrentIndex(self.ptabs[self.tab])
+            self.pattern_tabs.blockSignals(False)
         if isinstance(o, Orchestration):
             self.grid.show_orchestration(o, self.key(), self.name_style, self.locks[self.tab])
             self.checker_label.setText(o.report.summary() + (
                 "  (red cells come from your own edits; Ctrl+Z undoes them)" if o.report.errors else ""))
-            self.reason_label.setText(f"{o.approach} · {o.reason}")
+            patterns = pa.describe(o)
+            self.reason_label.setText(f"{pa.alt_name(o)} · {o.reason}" + (f" Patterns: {patterns}." if patterns
+                                                                          else ""))
             sel = self.grid.line_ids[0] if self.grid.line_ids else None
             if sel:
                 self.grid.select_part(sel)
@@ -1240,6 +1351,35 @@ class MainWindow(QMainWindow):
             elif self.orch is None:
                 self.stop()
                 self.player.seq = None
+
+    def set_pattern_tab(self, index: int):
+        """Show pattern alternative 1, 2 or 3 (index 0-2) of the current harmony alternative."""
+        if self._restoring:
+            return
+        self.ptabs[self.tab] = index
+        if self.pattern_tabs.currentIndex() != index:
+            self.pattern_tabs.blockSignals(True)
+            self.pattern_tabs.setCurrentIndex(index)
+            self.pattern_tabs.blockSignals(False)
+        self._show_current()
+        self._refresh()
+
+    def regenerate_patterns_action(self):
+        """New choices for the shown pattern alternative (2 or 3); locked parts keep their patterns."""
+        k = self.ptabs[self.tab]
+        h, cur = self.harmony, self.orch
+        if h is None or not k:
+            self.notify("Pick patterns 2 or 3", "Patterns 1 is exactly your own pattern settings. Choose Patterns 2 "
+                                                "or 3 to get other patterns, then regenerate them.")
+            return None
+        new = pa.regenerate_patterns(cur, h, self.locks[self.tab])
+        row = list(self.palts[self.tab])
+        row[k] = new
+        self.palts[self.tab] = row
+        self._show_current()
+        self.record(f"Regenerate patterns {pa.alt_name(new)}")
+        self._refresh()
+        return new
 
     def set_tab(self, index: int):
         self.tab = index
@@ -1307,6 +1447,7 @@ class MainWindow(QMainWindow):
     def _generated(self, result: dict):
         self.stop()
         self.alts = [result[a] if isinstance(result[a], Orchestration) else str(result[a]) for a in APPROACHES]
+        self.palts = [[None, None, None] for _ in range(3)]  # built again on demand for the new harmony
         # locks only make sense for parts that still exist
         self.locks = [frozenset(lid for lid in lk if isinstance(o, Orchestration) and lid in o.cells)
                       for lk, o in zip(self.locks, self.alts)]
@@ -1330,6 +1471,7 @@ class MainWindow(QMainWindow):
             return
         self.stop()
         self.alts = [None, None, None]
+        self.palts = [[None, None, None] for _ in range(3)]
         self.locks = [frozenset(), frozenset(), frozenset()]
         self.grid.clear_grid(message or "Confirm the chords, then press Generate.")
         self.piano.clear_part()
@@ -1340,7 +1482,7 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ edits on the current alternative
     def _edit(self, label: str, fn) -> Orchestration | None:
-        o = self.orch
+        o = self.harmony
         if o is None:
             return None
         QApplication.setOverrideCursor(Qt.WaitCursor)
@@ -1352,6 +1494,9 @@ class MainWindow(QMainWindow):
             return None
         QApplication.restoreOverrideCursor()
         self.alts[self.tab] = new
+        # patterns 2 and 3 keep their choices on the edited harmony
+        self.palts[self.tab] = [None] + [pa.reapply(p, new) if isinstance(p, Orchestration) else None
+                                         for p in self.palts[self.tab][1:]]
         self._show_current()
         self.record(label)
         self._refresh()
@@ -1584,7 +1729,7 @@ class MainWindow(QMainWindow):
             return []
         files = self.files_for_all()
         folder = self.parts_folder()
-        self.statusBar().showMessage(f"Exported {len(files)} files of alternative {self.approach} to {folder}",
+        self.statusBar().showMessage(f"Exported {len(files)} files of alternative {pa.alt_name(self.orch)} to {folder}",
                                      15000)
         self.open_folder(folder)
         return files
@@ -1661,7 +1806,7 @@ class MainWindow(QMainWindow):
             ipatterns=st.ipatterns, ppatterns=st.ppatterns, restrike=st.restrike, melody=inp(st.melody),
             bass=inp(st.bass), mel_inst=st.mel_inst, mel_double=st.mel_double, independent=st.independent,
             top_voice=st.top_voice, keep=st.keep, seed=st.seed, alts=st.alts, locks=st.locks, tab=st.tab,
-            dirty=st.dirty, scope=self.scope)
+            dirty=st.dirty, scope=self.scope, palts=st.palts, ptabs=st.ptabs)
 
     def save_project(self) -> Path | None:
         """Save to the project's file (asks where the first time). Returns the path, or None if cancelled."""
@@ -1711,7 +1856,7 @@ class MainWindow(QMainWindow):
         st = EditState(tuple(p.labels), p.tonic, p.mode, p.preset, frozenset(p.active), tuple(p.values),
                        tuple(p.ipatterns), tuple(p.ppatterns), p.restrike, entry(p.melody), entry(p.bass), p.mel_inst,
                        p.mel_double, p.independent, p.top_voice, p.keep, p.seed, tuple(p.alts), tuple(p.locks),
-                       p.tab, p.dirty)
+                       p.tab, p.dirty, tuple(tuple(r) for r in p.palts), tuple(p.ptabs))
         self.tempo.blockSignals(True)
         self.tempo.setValue(int(round(p.tempo)))
         self.tempo.blockSignals(False)

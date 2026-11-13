@@ -3,7 +3,8 @@
 Every file: concert pitch, 480 PPQ, 4/4, the app's tempo, starting at bar 1 with no lead-in, one constant CC1
 value per part at the start (the part's section Dynamics), and the whole clip length.
   * Per-part files (Milestone 3): one type-0 file per part line (divisi lines are separate files),
-    {ProjectName}_{Part}_{Alt}.mid, e.g. NightRise_Vln1-a_A.mid.
+    {ProjectName}_{Part}_{Alt}.mid, e.g. NightRise_Vln1-a_A.mid. {Alt} is the harmony alternative, plus the
+    pattern alternative when it isn't pattern 1 (v1.2): NightRise_Vln1-a_A2.mid.
   * Full score (Milestone 6): one type-1 file, a tempo track plus one named track per sounding part,
     {ProjectName}_Full_{Alt}.mid.
   * Combined divisi (Milestone 6, optional): one file per instrument that plays on several lines (divisi,
@@ -18,6 +19,7 @@ from pathlib import Path
 import mido
 
 from .generator import EXPORT_CODE, Orchestration
+from .pattern_alts import alt_name
 from .instruments import instruments
 from .midi_io import PPQ, Note, write_notes
 
@@ -48,7 +50,7 @@ def export_part(orch: Orchestration, line_id: str, folder: Path | str, project: 
     part = orch.part(line_id)
     if not part.notes:
         return None
-    path = Path(folder) / part_filename(project, line.export, orch.approach)
+    path = Path(folder) / part_filename(project, line.export, alt_name(orch))
     return write_notes(path, list(part.notes), tempo, track_name=line.label, length=length,
                        cc1=orch.cc1_for(line_id))
 
@@ -94,11 +96,11 @@ def export_full(orch: Orchestration, folder: Path | str, project: str, tempo: fl
     lines = [ln for ln in orch.lines if orch.part(ln.id).notes]
     if not lines:
         return None
-    path = Path(folder) / full_filename(project, orch.approach)
+    path = Path(folder) / full_filename(project, alt_name(orch))
     path.parent.mkdir(parents=True, exist_ok=True)
     mid = mido.MidiFile(type=1, ticks_per_beat=PPQ)
     head = mido.MidiTrack()
-    head.append(mido.MetaMessage("track_name", name=f"{project} {orch.approach}", time=0))
+    head.append(mido.MetaMessage("track_name", name=f"{project} {alt_name(orch)}", time=0))
     head.append(mido.MetaMessage("time_signature", numerator=4, denominator=4, time=0))
     head.append(mido.MetaMessage("set_tempo", tempo=mido.bpm2tempo(tempo), time=0))
     _append_timed(head, [], length)
@@ -143,7 +145,7 @@ def export_combined(orch: Orchestration, folder: Path | str, project: str, tempo
         notes = merge_unisons(n for lid in ids for n in orch.part(lid).notes)
         name = _group_label(orch, ids)
         cc1 = max(orch.cc1_for(lid) for lid in ids)
-        path = Path(folder) / part_filename(project, code, orch.approach)
+        path = Path(folder) / part_filename(project, code, alt_name(orch))
         out.append(write_notes(path, notes, tempo, track_name=name, length=length, cc1=cc1))
     return out
 

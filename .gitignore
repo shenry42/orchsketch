@@ -24,3 +24,5 @@ sound_check_results.txt
 testset_report.txt
 benchmark_report.txt
 /benchmark/
+# files other Claude chats leave here (not part of the code)
+/Claude outputs/

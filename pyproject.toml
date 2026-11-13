@@ -1,6 +1,6 @@
 [project]
 name = "orchsketch"
-version = "1.1"
+version = "1.2"
 description = "Orchestral sketching assistant: block-chord MIDI in, rule-checked orchestrations out."
 requires-python = ">=3.12"
 

@@ -1,0 +1,31 @@
+{
+  "id": "gallop",
+  "name": "Gallop (8th + two 16ths)",
+  "short": "gallop",
+  "order": 13,
+  "family": "8ths",
+  "kind": "hits",
+  "hits": [
+    0,
+    2,
+    3,
+    4,
+    6,
+    7,
+    8,
+    10,
+    11,
+    12,
+    14,
+    15
+  ],
+  "length": 2,
+  "accents": [
+    0,
+    4,
+    8,
+    12
+  ],
+  "choir": false,
+  "description": "A galloping 8th and two 16ths on every beat."
+}

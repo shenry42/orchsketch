@@ -1,0 +1,15 @@
+{
+  "id": "stabs",
+  "name": "Brass stabs",
+  "short": "stabs",
+  "order": 4,
+  "family": "pulse",
+  "kind": "hits",
+  "hits": [
+    0,
+    6
+  ],
+  "length": 2,
+  "choir": true,
+  "description": "Short 8th-note hits on beat 1 and the 'and' of 2."
+}

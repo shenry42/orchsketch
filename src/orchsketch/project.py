@@ -3,7 +3,7 @@
 A project holds the input files (embedded copies: the original bytes plus the notes as read), key, tempo,
 chord corrections, every setting (sliders per section, patterns per section / instrument / part, melody and
 bass options), locks, the chosen alternative, the seed, and each alternative's finished orchestration
-*itself*: rendered notes, cells, meta (swaps, earlier variations, rhythm figures) and checker report.
+(v1.2: also its pattern alternatives 2 and 3) *itself*: rendered notes, cells, meta (swaps, earlier variations, rhythm figures) and checker report.
 Reopening rebuilds those objects field by field and never regenerates, so the saved notes come back exactly,
 even after an app update changes the generator. The seed is only used when you choose to regenerate.
 
@@ -128,6 +128,8 @@ class Project:
     tab: int = 0
     dirty: bool = False
     scope: str = "all"
+    palts: tuple = ((None, None, None),) * 3  # v1.2: per harmony alternative, patterns 2 and 3 (index 1, 2)
+    ptabs: tuple = (0, 0, 0)  # v1.2: the pattern alternative shown per harmony alternative
     extra: dict = field(default_factory=dict)  # room for later versions
 
 

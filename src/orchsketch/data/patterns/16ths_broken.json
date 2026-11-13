@@ -1,0 +1,24 @@
+{
+  "id": "16ths_broken",
+  "name": "16ths broken 1-3-2-3",
+  "short": "16ths 1323",
+  "order": 22,
+  "family": "16ths",
+  "kind": "grid",
+  "step": "16th",
+  "accents": [
+    0,
+    4,
+    8,
+    12
+  ],
+  "contour": [
+    0,
+    2,
+    1,
+    2
+  ],
+  "end_on_anchor": true,
+  "choir": false,
+  "description": "Broken 16ths around the part's note."
+}

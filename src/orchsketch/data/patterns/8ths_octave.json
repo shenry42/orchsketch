@@ -1,0 +1,24 @@
+{
+  "id": "8ths_octave",
+  "name": "8ths octave pulse",
+  "short": "8ths 8va",
+  "order": 11,
+  "family": "8ths",
+  "kind": "grid",
+  "step": "8th",
+  "accents": [
+    0,
+    8
+  ],
+  "contour": [
+    0,
+    0
+  ],
+  "octaves": [
+    0,
+    1
+  ],
+  "end_on_anchor": true,
+  "choir": false,
+  "description": "8ths jumping between the part's note and its octave (down if up is out of range)."
+}

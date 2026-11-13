@@ -1,0 +1,27 @@
+{
+  "id": "8ths_332",
+  "name": "8ths 3+3+2 lift",
+  "short": "8ths 332",
+  "order": 12,
+  "family": "8ths",
+  "kind": "grid",
+  "step": "8th",
+  "accents": [
+    0,
+    6,
+    12
+  ],
+  "contour": [
+    0,
+    0,
+    0,
+    1,
+    1,
+    1,
+    0,
+    0
+  ],
+  "end_on_anchor": true,
+  "choir": false,
+  "description": "8ths in 3+3+2, the middle group a step higher."
+}

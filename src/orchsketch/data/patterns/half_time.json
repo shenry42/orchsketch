@@ -1,0 +1,15 @@
+{
+  "id": "half_time",
+  "name": "Half-time pulse",
+  "short": "half-time",
+  "order": 5,
+  "family": "pulse",
+  "kind": "hits",
+  "hits": [
+    0,
+    8
+  ],
+  "length": 4,
+  "choir": true,
+  "description": "Quarter-note hits on beats 1 and 3."
+}

@@ -1,0 +1,19 @@
+{
+  "id": "8ths",
+  "name": "8th ostinato",
+  "short": "8ths",
+  "order": 1,
+  "family": "8ths",
+  "kind": "grid",
+  "step": "8th",
+  "accents": [
+    0,
+    8
+  ],
+  "contour": [
+    0
+  ],
+  "passing": true,
+  "choir": true,
+  "description": "Repeated 8ths on the part's note, accented on beats 1 and 3."
+}

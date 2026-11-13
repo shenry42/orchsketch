@@ -1,0 +1,16 @@
+{
+  "id": "pulse_332",
+  "name": "3+3+2 pulse",
+  "short": "332 pulse",
+  "order": 30,
+  "family": "pulse",
+  "kind": "hits",
+  "hits": [
+    0,
+    6,
+    12
+  ],
+  "length": 4,
+  "choir": true,
+  "description": "Hits on the 3+3+2 points of the bar."
+}

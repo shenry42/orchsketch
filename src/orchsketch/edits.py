@@ -119,7 +119,7 @@ def regenerate_part(orch: Orchestration, line_id: str, *, variation: int | None 
                 cells[line_id][i] = p
                 labels[line_id][i] = f"free:{line_id}"
                 parts = _one_chord_parts(orch, cells, labels, i, insts)
-                rep = check(parts, [span], orch.key, orch.mode, rules=rules, instruments=insts)
+                rep = check(parts, [span], orch.key, orch.mode, rules=rules, instruments=insts, inside=False)
                 bad = [x for x in _must_fix(rep, rules) if x.message not in base and line_id in x.parts
                        or (not x.parts and x.message not in base)]
                 if bad:

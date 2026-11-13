@@ -98,3 +98,87 @@ B9,C,5,"Benchmark (Sam's own progression): Full epic, safe, seed 1",1.1
 B10,A,5,"Benchmark (Sam's own progression): Full epic, safe, seed 1",1.1
 B10,B,5,"Benchmark (Sam's own progression): Full epic, safe, seed 1",1.1
 B10,C,5,"Benchmark (Sam's own progression): Full epic, safe, seed 1",1.1
+P1a,B1,4,"Harmony B, patterns 1. Pattern 2 sounds the best. 1 is okay and 3 feel generic",1.2
+P1a,B2,5,"Harmony B, patterns 2. Pattern 2 sounds the best. 1 is okay and 3 feel generic",1.2
+P1a,B3,3,"Harmony B, patterns 3. Pattern 2 sounds the best. 1 is okay and 3 feel generic",1.2
+P1a2,B1,3,"Harmony B, patterns 1. Pattern 2 sounds good but pattern 3 is really sounding very nice and alive",1.2
+P1a2,B2,4,"Harmony B, patterns 2. Pattern 2 sounds good but pattern 3 is really sounding very nice and alive",1.2
+P1a2,B3,5,"Harmony B, patterns 3. Pattern 2 sounds good but pattern 3 is really sounding very nice and alive",1.2
+P1a3,B1,4,"Harmony B, patterns 1. Same as above (P1a2) overall but about 10% less pleasing than above",1.2
+P1a3,B2,5,"Harmony B, patterns 2. Same as above (P1a2) overall but about 10% less pleasing than above",1.2
+P1a3,B3,5,"Harmony B, patterns 3. Same as above (P1a2) overall but about 10% less pleasing than above",1.2
+P1b,B1,5,"Harmony B, patterns 1. Pattern 1 is the best, the other two are a bit meh/generic",1.2
+P1b,B2,3,"Harmony B, patterns 2. Pattern 1 is the best, the other two are a bit meh/generic",1.2
+P1b,B3,3,"Harmony B, patterns 3. Pattern 1 is the best, the other two are a bit meh/generic",1.2
+P1c,B1,4,"Harmony B, patterns 1. Pattern 2 is the best here. 1 is pretty nice and 3 feels meh/generic comparatively",1.2
+P1c,B2,5,"Harmony B, patterns 2. Pattern 2 is the best here. 1 is pretty nice and 3 feels meh/generic comparatively",1.2
+P1c,B3,3,"Harmony B, patterns 3. Pattern 2 is the best here. 1 is pretty nice and 3 feels meh/generic comparatively",1.2
+P1d,B1,4,"Harmony B, patterns 1. Pattern 2 is also best here. 1 & 3 feel a bit chaotic",1.2
+P1d,B2,5,"Harmony B, patterns 2. Pattern 2 is also best here. 1 & 3 feel a bit chaotic",1.2
+P1d,B3,3,"Harmony B, patterns 3. Pattern 2 is also best here. 1 & 3 feel a bit chaotic",1.2
+P2a,B1,5,"Harmony B, patterns 1. All sound really good but pattern 3 really shines and feels alive",1.2
+P2a,B2,5,"Harmony B, patterns 2. All sound really good but pattern 3 really shines and feels alive",1.2
+P2a,B3,5,"Harmony B, patterns 3. All sound really good but pattern 3 really shines and feels alive",1.2
+P2b,B1,5,"Harmony B, patterns 1. All sound great; if I had to nit pick the worst one it would be pattern 3 but not by much",1.2
+P2b,B2,5,"Harmony B, patterns 2. All sound great; if I had to nit pick the worst one it would be pattern 3 but not by much",1.2
+P2b,B3,5,"Harmony B, patterns 3. All sound great; if I had to nit pick the worst one it would be pattern 3 but not by much",1.2
+P2c,B1,5,"Harmony B, patterns 1. All sound good but about 10% less pleasing than above (P2b)",1.2
+P2c,B2,5,"Harmony B, patterns 2. All sound good but about 10% less pleasing than above (P2b)",1.2
+P2c,B3,5,"Harmony B, patterns 3. All sound good but about 10% less pleasing than above (P2b)",1.2
+P2d,B1,5,"Harmony B, patterns 1. All sound good but pattern 3 is a bit overly chaotic",1.2
+P2d,B2,5,"Harmony B, patterns 2. All sound good but pattern 3 is a bit overly chaotic",1.2
+P2d,B3,4,"Harmony B, patterns 3. All sound good but pattern 3 is a bit overly chaotic",1.2
+P3a,B1,3,"Harmony B, patterns 1. Pattern 1 & 2 feel like the rhythm is fighting with the melody",1.2
+P3a,B2,4,"Harmony B, patterns 2. Pattern 1 & 2 feel like the rhythm is fighting with the melody",1.2
+P3a,B3,5,"Harmony B, patterns 3. Pattern 1 & 2 feel like the rhythm is fighting with the melody",1.2
+P3b,B1,5,"Harmony B, patterns 1. All sound great",1.2
+P3b,B2,5,"Harmony B, patterns 2. All sound great",1.2
+P3b,B3,5,"Harmony B, patterns 3. All sound great",1.2
+P3c,B1,5,"Harmony B, patterns 1. All sound great",1.2
+P3c,B2,5,"Harmony B, patterns 2. All sound great",1.2
+P3c,B3,5,"Harmony B, patterns 3. All sound great",1.2
+P3d,B1,5,"Harmony B, patterns 1. All sound good, pattern 2 sounds amazingly alive and pattern 3 feels a bit generic",1.2
+P3d,B2,5,"Harmony B, patterns 2. All sound good, pattern 2 sounds amazingly alive and pattern 3 feels a bit generic",1.2
+P3d,B3,4,"Harmony B, patterns 3. All sound good, pattern 2 sounds amazingly alive and pattern 3 feels a bit generic",1.2
+P4a,B1,4,"Harmony B, patterns 1. Sound a bit generic and hard to tell the patterns apart but not terrible",1.2
+P4a,B2,4,"Harmony B, patterns 2. Sound a bit generic and hard to tell the patterns apart but not terrible",1.2
+P4a,B3,4,"Harmony B, patterns 3. Sound a bit generic and hard to tell the patterns apart but not terrible",1.2
+P4b,B1,4,"Harmony B, patterns 1. Same as above (P4a)",1.2
+P4b,B2,4,"Harmony B, patterns 2. Same as above (P4a)",1.2
+P4b,B3,4,"Harmony B, patterns 3. Same as above (P4a)",1.2
+P4c,B1,3,"Harmony B, patterns 1. Hard to make out the rhythms",1.2
+P4c,B2,3,"Harmony B, patterns 2. Hard to make out the rhythms",1.2
+P4c,B3,3,"Harmony B, patterns 3. Hard to make out the rhythms",1.2
+P4d,B1,4,"Harmony B, patterns 1. Also hard to make out rhythms; if I had to pick the best it would be pattern 2",1.2
+P4d,B2,4,"Harmony B, patterns 2. Also hard to make out rhythms; if I had to pick the best it would be pattern 2",1.2
+P4d,B3,3,"Harmony B, patterns 3. Also hard to make out rhythms; if I had to pick the best it would be pattern 2",1.2
+P5a,B1,5,"Harmony B, patterns 1. Favorite so far, sounds great (sheet row p5ab)",1.2
+P5a,B2,5,"Harmony B, patterns 2. Favorite so far, sounds great (sheet row p5ab)",1.2
+P5a,B3,5,"Harmony B, patterns 3. Favorite so far, sounds great (sheet row p5ab)",1.2
+P5b,B1,5,"Harmony B, patterns 1. Same as above, sounds great; pattern 3 stands out as a little bit worse than 1 & 2",1.2
+P5b,B2,5,"Harmony B, patterns 2. Same as above, sounds great; pattern 3 stands out as a little bit worse than 1 & 2",1.2
+P5b,B3,4,"Harmony B, patterns 3. Same as above, sounds great; pattern 3 stands out as a little bit worse than 1 & 2",1.2
+P5c,B1,3,"Harmony B, patterns 1. Pattern 1 feels overly chaotic. Pattern 3 feels like elements are clashing",1.2
+P5c,B2,5,"Harmony B, patterns 2. Pattern 1 feels overly chaotic. Pattern 3 feels like elements are clashing",1.2
+P5c,B3,4,"Harmony B, patterns 3. Pattern 1 feels overly chaotic. Pattern 3 feels like elements are clashing",1.2
+P5d,B1,4,"Harmony B, patterns 1. Feels like elements are clashing in all three. Pattern 2 has the most",1.2
+P5d,B2,3,"Harmony B, patterns 2. Feels like elements are clashing in all three. Pattern 2 has the most",1.2
+P5d,B3,4,"Harmony B, patterns 3. Feels like elements are clashing in all three. Pattern 2 has the most",1.2
+P6a,B1,5,"Harmony B, patterns 1. All sound great, pattern 3 is my favorite if I had to pick",1.2
+P6a,B2,5,"Harmony B, patterns 2. All sound great, pattern 3 is my favorite if I had to pick",1.2
+P6a,B3,5,"Harmony B, patterns 3. All sound great, pattern 3 is my favorite if I had to pick",1.2
+P6a2,B1,5,"Harmony B, patterns 1. Sounds good but hard to tell apart from above (P6a)",1.2
+P6a2,B2,5,"Harmony B, patterns 2. Sounds good but hard to tell apart from above (P6a)",1.2
+P6a2,B3,5,"Harmony B, patterns 3. Sounds good but hard to tell apart from above (P6a)",1.2
+P6a3,B1,5,"Harmony B, patterns 1. Same as above",1.2
+P6a3,B2,5,"Harmony B, patterns 2. Same as above",1.2
+P6a3,B3,5,"Harmony B, patterns 3. Same as above",1.2
+P6b,B1,5,"Harmony B, patterns 1. All sound great; if I had to nit pick the worst one it would be pattern 3 but not by much",1.2
+P6b,B2,5,"Harmony B, patterns 2. All sound great; if I had to nit pick the worst one it would be pattern 3 but not by much",1.2
+P6b,B3,5,"Harmony B, patterns 3. All sound great; if I had to nit pick the worst one it would be pattern 3 but not by much",1.2
+P6c,B1,5,"Harmony B, patterns 1. All sound great; if I had to nit pick the worst one it would be pattern 3 but not by much",1.2
+P6c,B2,5,"Harmony B, patterns 2. All sound great; if I had to nit pick the worst one it would be pattern 3 but not by much",1.2
+P6c,B3,5,"Harmony B, patterns 3. All sound great; if I had to nit pick the worst one it would be pattern 3 but not by much",1.2
+P6d,B1,4,"Harmony B, patterns 1. Pattern 1 and 3 feel overly chaotic/elements clashing",1.2
+P6d,B2,5,"Harmony B, patterns 2. Pattern 1 and 3 feel overly chaotic/elements clashing",1.2
+P6d,B3,3,"Harmony B, patterns 3. Pattern 1 and 3 feel overly chaotic/elements clashing",1.2
