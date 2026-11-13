@@ -1,0 +1,14 @@
+{
+  "id": "hit_downbeat",
+  "name": "Downbeat hit",
+  "short": "hit",
+  "order": 35,
+  "family": "hit",
+  "kind": "hits",
+  "hits": [
+    0
+  ],
+  "length": 8,
+  "choir": true,
+  "description": "One accented hit (a half note) on each bar's downbeat, rests after it."
+}

@@ -1,0 +1,20 @@
+{
+  "id": "phrase4",
+  "name": "4-bar phrase",
+  "order": 5,
+  "span": "phrase",
+  "steps": [
+    {},
+    {
+      "density": -1,
+      "dynamics": -1
+    },
+    {
+      "dynamics": -1
+    },
+    {
+      "dropout": true
+    }
+  ],
+  "description": "An arc every phrase: full on its first bar, lighter in the middle, a drop-out before the next phrase."
+}

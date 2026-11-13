@@ -28,7 +28,7 @@ from orchsketch.theory import Key
 from test_generator import EXPECTED, load, must_fix
 
 DATA = Path(__file__).parent / "data"
-NEW = tuple(p for p in pat.PATTERNS if p not in pat.V1_PATTERNS)
+NEW = tuple(p for p in pat.PATTERNS if p not in pat.V1_PATTERNS + pat.V13_PATTERNS)  # Milestone 7's patterns
 EPIC = next(p for p in builtin_presets() if p.id == "full_epic")
 SNAP = json.loads((DATA / "v11_patterns_snapshot.json").read_text(encoding="utf-8"))
 

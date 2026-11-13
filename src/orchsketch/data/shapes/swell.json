@@ -1,0 +1,23 @@
+{
+  "id": "swell",
+  "name": "Swell",
+  "order": 2,
+  "span": "clip",
+  "steps": [
+    {
+      "density": -2,
+      "dynamics": -2,
+      "pattern": -1
+    },
+    {
+      "density": -1,
+      "dynamics": -1
+    },
+    {},
+    {
+      "density": -1,
+      "dynamics": -1
+    }
+  ],
+  "description": "Grows to the settings in the third quarter, then eases off."
+}

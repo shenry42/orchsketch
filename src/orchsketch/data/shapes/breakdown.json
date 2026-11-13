@@ -1,0 +1,23 @@
+{
+  "id": "breakdown",
+  "name": "Breakdown",
+  "order": 6,
+  "span": "clip",
+  "steps": [
+    {},
+    {
+      "sections": 2,
+      "density": -2,
+      "dynamics": -1,
+      "forces": -1
+    },
+    {
+      "sections": 2,
+      "density": -2,
+      "dynamics": -1,
+      "forces": -1
+    },
+    {}
+  ],
+  "description": "Strips to the first two sections (strings and brass where they play), thinner and a step softer, in the middle of the clip, then returns."
+}

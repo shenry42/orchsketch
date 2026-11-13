@@ -42,11 +42,16 @@ def main() -> int:
     app.setApplicationName("OrchSketch")
     apply_dark_theme(app)
     win = MainWindow()
+    from . import parallel
+    parallel.warm()  # start the A/B/C worker processes while the window opens
     args = [a for a in sys.argv[1:] if not a.startswith("-")]
     if args:  # a .mid or .osk file (e.g. double-clicked)
         win.load(args[0])
     win.show()
-    return app.exec()
+    try:
+        return app.exec()
+    finally:
+        parallel.shutdown()
 
 
 if __name__ == "__main__":

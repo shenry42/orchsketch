@@ -1,0 +1,26 @@
+{
+  "id": "build",
+  "name": "Build",
+  "order": 1,
+  "span": "clip",
+  "steps": [
+    {
+      "density": -3,
+      "dynamics": -3,
+      "pattern": -2,
+      "forces": -1
+    },
+    {
+      "density": -2,
+      "dynamics": -2,
+      "pattern": -1,
+      "forces": -1
+    },
+    {
+      "density": -1,
+      "dynamics": -1
+    },
+    {}
+  ],
+  "description": "Starts thin, soft and simpler, and grows bar by bar to the settings at the end."
+}

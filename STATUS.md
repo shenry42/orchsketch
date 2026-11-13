@@ -4,12 +4,11 @@
 > The chat that finishes a milestone updates this file before it ends.
 
 ## Current state
-- **Version:** v1.2
-- **Last milestone completed:** 7 — Pattern engine (v1.2, Phase 2). Before it: 6 — Finish (v1.0) and the
-  second benchmark (v1.1).
-- **Next:** Phase 2, Milestone 8 — v1.3 Textures and shapes (SPEC §14).
+- **Version:** v1.3
+- **Last milestone completed:** 8 — Textures and shapes (v1.3, Phase 2). Before it: 7 — Pattern engine (v1.2).
+- **Next:** Phase 2, Milestone 9 — v1.4 Expression (SPEC §14).
 - **Repo:** https://github.com/shenry42/orchsketch
-- **Last updated:** 2026-11-13 (Milestone 7 done)
+- **Last updated:** 2026-11-13 (Milestone 8 done)
 
 ## Milestones
 - [x] 1 — v0.1 Read and label (+ packaging spike, audio test with Ableton open)
@@ -23,13 +22,40 @@
 ### Phase 2 — Composition (SPEC §14)
 - [x] 7 — v1.2 Pattern engine (pattern data files, shape-preserving ostinato + note-mode control, accent groupings,
   pattern A/B/C, parallels inside patterns, Phase 2 ear-test set, speed cache)
-- [ ] 8 — v1.3 Textures and shapes (intensity shapes, arpeggios, stabs, phrase-end fills, unison themes, pulse beds)
+- [x] 8 — v1.3 Textures and shapes (speed fix: A/B/C in parallel processes; intensity shapes, arpeggios, hits and
+  anticipations, phrase-end fills, unison/octave theme, pulse bed; pattern emphasis, clear low register,
+  accents on chord changes)
 - [ ] 9 — v1.4 Expression (CC1/CC11 curves, swells, tremolo part, risers, velocity shaping + humanize)
 - [ ] 10 — v1.5 Lines (imitation, runs, pickups, rips/falls, simple bass, countermelody engine, targeted placement)
 - [ ] 11 — v1.6 Control (pedal instrument, role overrides, choir override, player counts, keep-as-is, SSAATTBB, repo move)
 - [ ] 12 — v2.0 AI line writer (Claude API, button only, checker-validated)
 
 ## Test results (latest run)
+- **Milestone 8 (v1.3):**
+  - Automated tests: Claude's workspace 569 passed, 1 skipped in 10:06 (music21 not installed there), slow
+    sweeps included. `release.bat` runs all of them on Windows before tagging.
+  - **v1.2 unchanged:** the A, v0.4 and v1.1 pattern snapshots and every earlier sweep pass with every new
+    option at its default. One deliberate change outside the defaults: Hybrid/Scale steps parts within an
+    octave of a melody play chord tones (see Decisions).
+  - **Speed (the v1.2 miss, fixed):** `scripts\benchmark.bat` on Sam's PC: test 11 + melody/bass files
+    **2.5–2.7 s** in every setup (v1.2: 5.0–5.2 s; SPEC §14 limit about 4 s), B01 + files 1.5–1.6 s,
+    4-bar progressions 0.2–0.3 s. Parallel and one-process results are identical (tests compare them).
+    The packaged app's `--self-check` (Sam, 2026-11-13) passes, worker processes included.
+  - `scripts\benchmark.bat`: 50/50 runs pass (11 benchmark runs, the 28 Phase 2 projects and the 11
+    Milestone 8 projects in `Projects\Benchmark\Phase2b\`): 0 generator errors, 0 must-pass warnings,
+    nothing outside playable range, projects reopen exactly.
+  - New sweeps, all with 0 errors and 0 `generator_must_pass` warnings and the harmony unchanged: every shape
+    × pattern family (rotated over the sections) × fill × phrase length on all 12 files × A/B/C (`slow`; a
+    sample runs in the quick suite); arpeggios and hits everywhere; shapes with melody + bass files on tests
+    1, 4 and 11; theme in octaves on all 12 files × every preset × A/B/C, with and without files.
+  - **Ear test** (Sam, 2026-11-13, `tests/ratings.csv` T1–T11, one score per case, harmony B except T2 on
+    A): T1 emphasis 5, T2 A + clear low 4, T3 Hybrid under the melody 5 (v1.2: "chaotic"), T4 build and hit
+    4 → 5 after tuning, T5 4-bar phrase + runs 3 → 4, T6 breakdown 2 → 4, T7 pulse bed 4 → 4, T8 arpeggio
+    up-down 5, T9 root-5th-octave-10th 4, T10 anticipations 5, T11 theme 4. Final mean 4.5, none "doesn't make
+    musical sense". Sam's notes (follow-ups in Known issues): T2 rhythm still a bit buried on A (maybe right
+    for a warm sketch); T5's off feel is the melody file's short notes, doubled an octave up in the piccolo;
+    T6 still thin in the break; T7 better with softer woodwinds; T9 and T11 "a little boring/generic".
+- Milestone 7 (v1.2) results follow.
 - **Milestone 7 (v1.2):**
   - Automated tests: Claude's workspace 502 passed, 1 skipped in 14:41 (music21 not installed there), slow
     sweeps included. Windows `run_tests.bat` (Sam, 2026-11-13): 425 passed, 89 deselected (`slow`) in 7:27.
@@ -180,14 +206,33 @@
 - Low parts on shaped patterns in Hybrid/Scale steps (e.g. tuba on 8ths 3+3+2 lift) often fall back to chord
   tones or Sustain because steps in the low register break the low-interval limits. Expected; a per-role
   pattern choice could come with role overrides (Milestone 11).
-- **Speed:** 16 bars with melody and bass files take about 5 s on Sam's PC (the v1.1 harmony search; v1.2 made
-  it about 20% faster, patterns add nothing). Over SPEC §14's "about 4 s". The next step that would fix it is
-  running A, B and C in parallel processes (about 2.5x; needs `multiprocessing.freeze_support()` in the
-  packaged app) or sharing candidate checks between A/B/C.
-- **Ear-test follow-ups for Milestone 8/9** (Sam, v1.2): patterns are too quiet to hear (unaccented notes at
-  80% of mf; velocity shaping is Milestone 9); approach A's dense low register hides the rhythm; Scale steps
-  and Hybrid under a melody can sound chaotic/clashing (a tighter clash rule or a default of Chord tones for
-  parts near the melody's register); test 11 + files is a busy texture where patterns blur.
+- **Speed:** fixed in v1.3 (A/B/C in parallel worker processes): 16 bars with files take 2.5–2.7 s on Sam's
+  PC. Generate now takes as long as the slowest alternative (usually B). If a later milestone gets slower,
+  share candidate checks between A/B/C or cache the solver's per-chord candidates.
+- **Ear-test follow-ups** (Sam): v1.2's quiet patterns, A's buried rhythm and Hybrid under a melody were
+  handled in v1.3 (Pattern emphasis, Clear low register, chord tones near the melody). Still open for
+  Milestone 9 (Expression, velocity shaping):
+  - Pattern emphasis and Clear low register are options, off by default (v1.2's output stays the default).
+    Making emphasis the default would mean re-making the snapshots on purpose.
+  - Balance between sections: in the Pulse bed (T7) the woodwinds sound too loud; Sam fixes it with
+    their Dynamics. A per-section balance table (woodwinds a step under strings at the same marking) or
+    CC11 shaping belongs in Milestone 9.
+  - Breakdown (T6) still feels thin in the break even with two sections kept; more density there is a data
+    change (`data/shapes/breakdown.json`).
+  - T5: the melody file's short notes, doubled an octave up in the piccolo (harmony B's auto doubling at
+    Density 5), feel off. A rule for short notes in a high doubling (skip them, or double only notes of a
+    quarter or longer) would fix it.
+  - Root-5th-octave-10th (T9) and theme in octaves (T11): "a little boring/generic" (correct but plain).
+- **Shapes are render-only.** Your settings are the shape's peak: a shape only rests lines, lowers
+  Dynamics and moves patterns down a level, so the harmony is never re-solved (a thin bar keeps the full
+  voicing's notes, minus the resting lines). Forces in shapes only plays Divisi as Section (one divisi line
+  per string instrument); Solo never switches per bar (one patch per exported file).
+- **Theme in octaves** with the textbook melody files (C5–B5) in Safe mode: only the horns can play it;
+  cellos, trombones and choir sit out (out of range in one octave at C3 or above). Moderate mode or a
+  lower melody brings them in; without a melody file (the clip's top note) all four groups usually play.
+  One line per instrument plays it (Horn 1, Trombone 1, Cellos); the other horns and trombones rest.
+- Shape and fill drop-outs leave fixed parts (locks, your files, the theme) sounding; a locked part that
+  keeps sounding while its section drops out isn't checked for a spacing gap at that 8th (rare).
 - Pattern alternatives only vary sections that play a pattern. With Sustain everywhere, patterns 2 and 3 are
   greyed out.
 - Parts that play your melody or bass file keep the file's rhythm; section patterns don't apply to them.
@@ -428,19 +473,79 @@
     cleared); `_Fixed` caches its per-chord lookups (`forget()` after the independent bass changes a
     figure); the melody-clash check skips melody notes with no note a semitone away.
 
+- **Milestone 8 decisions (Sam):** speed fix first, A/B/C in parallel processes. Forces in shapes only between
+  Section and Divisi. Pattern emphasis is an option, off by default. Choir voices singing the theme in
+  unison/octaves count as one line (no `choir_parallels`). CC1 stays one constant value per part; shapes
+  change velocity only (curves are Milestone 9). After the first ear test: shapes tuned (Breakdown keeps 2
+  sections at Density −2 and one step softer; the Build-and-hit hit is a half note, a step softer; each
+  Pulse bed section enters a step softer) and the T5 case runs in the strings only. The ear test is one
+  score per case on one harmony tab.
+- **Milestone 8 decisions (Claude's calls):**
+  - *Parallel generation* (`parallel.py`): a spawn-context pool of 3 workers, started in the background at
+    app start (`parallel.warm()`), shut down on exit. `generate_all(parallel=True)` (the window passes it);
+    results are returned to the window unchanged; a broken pool (or none) falls back to one process for the
+    session. `GenerationError` comes back as the result, other exceptions are raised as before. Worker
+    processes re-import the main module, so `__main__.py` and `scripts/orchsketch_main.py` guard with
+    `if __name__ == "__main__"` and call `freeze_support()`. Tests use the pool too (`MainWindow.parallel`).
+  - *Shapes* (`shapes.py`, `data/shapes/*.json`): steps per bar (density, forces, dynamics, pattern,
+    sections, hit, dropout, entering); spans clip / phrase / layers. Applied in `generator._render`: line
+    rests per chord through `_thin` (the Density rule) with per-section k, Divisi as Section via the
+    approach's lead order, sections in the order strings, brass, woodwinds, choir. Each chord's rests are
+    checked against the chord as set (window check); `_finish` re-renders with chords "unmasked" where the
+    full check still finds a must-fix problem (e.g. a choir leap after a rest). Pattern levels per bar go
+    through `patterns.step_down` (a pattern's `down`, else its family's: 16ths → 8ths → half-time →
+    Sustain; choir to patterns it can sing). A chord across a bar line is rendered in per-bar pieces when
+    the pattern changes there. All shape settings are in `RENDER_ONLY`.
+  - *Fills*: phrase boundaries every `Settings.phrase` bars where a chord starts and another phrase follows.
+    Runs: the section's top line and its octave doublings above the rest of the section, all or none; 4 16ths
+    (run) or 2 8ths (pickup) up or down the next chord's scale (from below when the line rises or holds),
+    ending a step from its next note. `Part.free` marks them for the checker (range only); a run is dropped
+    for that section where the rest of the section wouldn't pass at that beat. Drop-out: the last beat.
+    Choirs only drop out.
+  - *Anticipations*: `anticipate` hits patterns strike the next chord's voiced note an 8th before the chord
+    change, tied over (the next chord's first strike is joined). Parts holding a note a semitone, major 7th
+    or minor 9th from it release an 8th early; against a fixed part it strikes on the beat. The safety net
+    sees all of it.
+  - *Arpeggios*: chord tones always (`note_mode: "chord"` in the file); `degrees` contours (0/3/5/8/10)
+    take the chord tone nearest each interval above the part's note.
+  - *Theme in octaves* (`_theme_plan`, a generation setting): theme notes = the melody file, else the clip's
+    top note per chord. Groups: horns, tenor trombones, cellos (one line each), choir S/A/T (the choir bass
+    sings the bass). Each line takes one octave for the whole theme: every note in range, instruments at C3
+    or above and clear of the low-interval limits against the chord's bass and the bass file at any octave
+    of the bass voice, preferring G3 and up, then the instrument's middle; choir voices top down, each at
+    most as high as the one above. Plans: all groups, then without trombones, cellos, choir. The theme
+    rests where it would double a leading tone/7th in a slash bass. Lines keep their ids and role `melody`
+    (spacing exemption, melody-clash checks); the other lines of a theme instrument rest. No plan → voiced as
+    usual (with the melody plan, if a melody file is loaded) and the reason says so.
+  - *Checker*: `Part.free` spans; every check but range uses `Part.cnotes`. Choir parts that are both
+    role `melody` and move in unison/octaves at a chord change are one line.
+  - *Pattern emphasis*: +1 dynamic step for a part's patterned pieces, −1 for its Sustain pieces when any part
+    plays a pattern, unaccented 90%; *Clear low register*: grid patterns on cells below C3 one level down;
+    *Accent chord changes*: the first note at a chord start one step up (`accented()`).
+  - *Window*: Shape and Fill are per-section values (`values[sec]["shape"/"fill"]`, render keys); Phrase and
+    the three rhythm checkboxes are window-wide; Theme in octaves sits in the top bar and marks Generate
+    orange. New `EditState`/`Project` fields: phrase, emphasis, clear_low, change_accents, theme.
+    `pattern_alts.describe` adds shape, fill and the options to the reason line.
+  - *Ear-test set* `tests/data/phase2b_ear_tests.json`: cases with sections, parts, options and the harmony tab
+    the project opens on (`testset.phase2b`).
+
 ## Notes for the next chat
-- v1.2 (Milestone 7) is done. **Next: Milestone 8, v1.3 Textures and shapes** (SPEC §14). The research behind
-  Phase 2 is the Claude Doc *OrchSketch Phase 2 — Ranked Feature Research*:
+- v1.3 (Milestone 8) is done. **Next: Milestone 9, v1.4 Expression** (SPEC §14): CC1/CC11 curves per part
+  (following the intensity shape), swells, tremolo as its own part, risers, velocity shaping + humanize.
+  The research behind Phase 2 is the Claude Doc *OrchSketch Phase 2 — Ranked Feature Research*:
   https://claude.ai/artifact/3FppXiZGQNhVj13gn5DwZX
-  - Milestone 8's arpeggios, stabs/anticipations and phrase-end fills are new pattern files and, where needed,
-    new `kind`s in `patterns.py` (sustain/grid/hits today). Keep the rule that a pattern strikes its anchor
-    at the chord start; anticipations (an 8th early) break it on purpose, so they need their own check path.
-  - Intensity shapes change density/forces/pattern/dynamics per bar: density and forces are generation
-    settings (not render-only), so shapes touch the solver, not only `_render`.
-  - Guardrails: `tests/data/v11_patterns_snapshot.json` + the A and v0.4 snapshots must keep passing with
-    every new option at its default; re-run `scripts\benchmark.bat` (now with the Phase 2 set and times) and
-    log ratings.
+  - Start from the ear-test follow-ups in Known issues (section balance in the Pulse bed, short notes in a high
+    melody doubling, Breakdown density, "generic" arpeggio/theme).
+  - Shapes already give a per-bar dynamics step per section (`shapes.bar_steps`); CC curves can follow it.
+    Export writes one constant CC1 per part today (`Orchestration.cc1_for`).
+  - Guardrails: the A, v0.4 and v1.1 pattern snapshots must keep passing with every new option at its
+    default; re-run `scripts\benchmark.bat` (it builds Phase2 and Phase2b) and log ratings, one score per case.
   - Housekeeping (Milestone 11): move the repo out of `Documents\OrchSketch`.
+- **Textures** (v1.3): `shapes.py` + `data/shapes/`, `patterns.step_down`, new pattern fields (`note_mode`,
+  `degrees`, `anticipate`, `down`), generator `_render` (shape rests, per-bar pieces, anticipations, fills,
+  velocities), `_finish` (unmask loop), `_theme_plan`, `parallel.py`. New Settings fields: `shape`,
+  `section_shapes`, `phrase`, `fill`, `section_fills`, `pattern_emphasis`, `clear_low`, `change_accents` (all
+  render-only) and `theme` (generation).
 - **Patterns** (v1.2): `patterns.py` (library, groupings, `make_mapper`, `render`), data in `data/patterns/` and
   `data/accents.json`, generator `_render` (levels, safety net), `pattern_alts.py` (pattern alternatives),
   checker `check_parallels_inside`. New Settings fields: `note_mode`, `section_note_modes`, `accent`,

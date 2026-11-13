@@ -1,0 +1,17 @@
+{
+  "id": "stabs_sync",
+  "name": "Syncopated stabs",
+  "short": "sync stabs",
+  "order": 33,
+  "family": "pulse",
+  "kind": "hits",
+  "hits": [
+    0,
+    3,
+    6,
+    10
+  ],
+  "length": 1,
+  "choir": false,
+  "description": "Short hits on 1, the 'a' of 1, the 'and' of 2 and the 'and' of 3."
+}

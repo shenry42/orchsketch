@@ -35,9 +35,10 @@ from .. import project as pj
 from ..export import BOTH, EXPORT_CHOICES, EXPORT_ROOT, FULL, PARTS, export_all, export_folder, export_part, safe_name
 from .. import patterns as pat
 from .. import pattern_alts as pa
+from .. import shapes as shp
 from ..generator import (
-    APPROACH, APPROACHES, CHARACTERS, DENSITY_STEPS, DOUBLINGS, DYNAMIC_STEPS, FORCES, MELODY_HOSTS, TOP_INPUT,
-    TOP_SMOOTH, Ensemble, GenerationError, Orchestration, Settings, generate_all, rerender,
+    APPROACH, APPROACHES, CHARACTERS, DENSITY_STEPS, DOUBLINGS, DYNAMIC_STEPS, FILL_NAMES, FILL_NONE, FILLS, FORCES,
+    MELODY_HOSTS, TOP_INPUT, TOP_SMOOTH, Ensemble, GenerationError, Orchestration, Settings, generate_all, rerender,
 )
 from ..history import History
 from ..instruments import SECTIONS, instruments
@@ -58,7 +59,7 @@ DOUBLING_NAMES = {"auto": "Doubling: auto", "off": "Doubling: off", "up": "Doubl
 CUSTOM = "custom"
 ALL = "all"
 SLIDERS = ("character", "forces", "density", "dynamics")
-RENDER_KEYS = ("dynamics", "pattern", "note_mode", "accent")  # apply at once, without regenerating
+RENDER_KEYS = ("dynamics", "pattern", "note_mode", "accent", "shape", "fill")  # apply at once, without regenerating
 NO_PALTS = ((None, None, None),) * 3  # pattern alternatives per harmony tab: (None = pattern 1, 2, 3)
 EXPORT_NAMES = {PARTS: "Per-part files", FULL: "Full score file", BOTH: "Parts + full score"}
 SAVE, DISCARD, CANCEL = "save", "discard", "cancel"
@@ -66,7 +67,8 @@ SAVE, DISCARD, CANCEL = "save", "discard", "cancel"
 
 def default_values() -> dict:
     return {sec: {"character": "safe", "forces": "section", "density": 5, "dynamics": "mf",
-                  "pattern": pat.SUSTAIN, "note_mode": pat.CHORD_TONES, "accent": pat.PATTERN_ACCENTS}
+                  "pattern": pat.SUSTAIN, "note_mode": pat.CHORD_TONES, "accent": pat.PATTERN_ACCENTS,
+                  "shape": shp.STEADY, "fill": FILL_NONE}
             for sec in SECTIONS}
 
 
@@ -134,6 +136,11 @@ class EditState:
     dirty: bool = False  # generation settings changed since the last Generate
     palts: tuple = NO_PALTS  # per harmony tab: (None, pattern 2, pattern 3) Orchestration or None (not built)
     ptabs: tuple = (0, 0, 0)  # per harmony tab: the pattern alternative shown (0 = pattern 1)
+    phrase: int = 4  # v1.3: bars per phrase (shapes, fills)
+    emphasis: bool = False  # v1.3: pattern emphasis
+    clear_low: bool = False  # v1.3: clear low register
+    change_accents: bool = False  # v1.3: accent chord changes
+    theme: bool = False  # v1.3: unison/octave theme (a generation setting)
     extra: dict = field(default_factory=dict, compare=False, hash=False)
 
 
@@ -175,6 +182,7 @@ class MainWindow(QMainWindow):
         self.history = History()
         self._restoring = False
         self.run_async = True  # tests set False: Generate then runs in the calling thread
+        self.parallel = True  # A, B and C in worker processes (parallel.py); False: one process
         self._pool = ThreadPoolExecutor(max_workers=1)
         self._job = None
         self._build()
@@ -291,6 +299,12 @@ class MainWindow(QMainWindow):
                                   "instead of holding the chord's bass note. Needs Character at Moderate for "
                                   "the sections playing the bass, and no bass file.")
         self.indep_box.toggled.connect(lambda _: self._setting_changed("Independent bass"))
+        self.theme_box = QCheckBox("Theme in octaves")
+        self.theme_box.setToolTip("Unison/octave theme: your melody (or, without a melody file, your clip's top "
+                                  "note) in octaves across horns, trombones, cellos and choir instead of voiced; "
+                                  "the rest of the orchestra harmonizes around it. Takes effect at the next "
+                                  "Generate.")
+        self.theme_box.toggled.connect(lambda on: self._setting_changed("Theme in octaves" if on else "Theme off"))
         self.restrike_box = QCheckBox("Re-strike every bar")
         self.restrike_box.setToolTip("Sustain: re-strike held notes at every bar line instead of tying them over "
                                      "repeated chords. Applies at once.")
@@ -309,7 +323,7 @@ class MainWindow(QMainWindow):
         gen.addWidget(self.top_box)
         gen.addWidget(self.keep_box)
         gen.addSpacing(12)
-        for w in (self.mel_inst_box, self.mel_double_box, self.indep_box, self.restrike_box):
+        for w in (self.mel_inst_box, self.mel_double_box, self.theme_box, self.indep_box, self.restrike_box):
             gen.addWidget(w)
         gen.addStretch(1)
         gen.addWidget(QLabel("Seed"))
@@ -521,6 +535,50 @@ class MainWindow(QMainWindow):
         self.accent_box.setToolTip("Accent grouping for 8th and 16th patterns: the first note of each group is "
                                    "accented; 'short' also shortens the others. Applies at once.")
         form.addRow("Accents", self.accent_box)
+        self.shape_box = QComboBox()
+        for sh in shp.SHAPES:
+            self.shape_box.addItem(shp.SHAPE_NAMES[sh], sh)
+        self.shape_box.setToolTip("Intensity shape: density, forces, pattern and dynamics change bar by bar. Your "
+                                  "settings are the peak. " + " ".join(f"{shp.SHAPE_NAMES[k]}: {v.description}"
+                                                                      for k, v in shp.library().items()
+                                                                      if k != shp.STEADY)[:900]
+                                  + " Applies at once.")
+        form.addRow("Shape", self.shape_box)
+        self.fill_box = QComboBox()
+        for f in FILLS:
+            self.fill_box.addItem(FILL_NAMES[f], f)
+        self.fill_box.setToolTip("Phrase-end fill before every new phrase: a 16th run or a pickup in the "
+                                 "section's top line into the next chord, or a drop-out on the last beat. "
+                                 "Applies at once.")
+        form.addRow("Fill", self.fill_box)
+        self.phrase_box = QComboBox()
+        for n in shp.PHRASES:
+            self.phrase_box.addItem(f"{n} bars", n)
+        self.phrase_box.setCurrentIndex(self.phrase_box.findData(4))
+        self.phrase_box.setToolTip("Phrase length (all sections): where fills go and how the 4-bar phrase shape "
+                                   "repeats. Applies at once.")
+        form.addRow("Phrase", self.phrase_box)
+        self.emphasis_box = QCheckBox("Pattern emphasis")
+        self.emphasis_box.setToolTip("Patterned parts a dynamic step louder (unaccented notes at 90%), sustained "
+                                     "parts under them a step softer, so the rhythm is heard. Applies at once.")
+        self.clear_low_box = QCheckBox("Clear low register")
+        self.clear_low_box.setToolTip("8th and 16th patterns below C3 play one level simpler (16ths become 8ths, "
+                                      "8ths half-time), so the low register doesn't blur the rhythm. "
+                                      "Applies at once.")
+        self.change_accent_box = QCheckBox("Accent chord changes")
+        self.change_accent_box.setToolTip("Every part's first note at a chord change a dynamic step louder. "
+                                          "Applies at once.")
+        ebox = QVBoxLayout()
+        for w in (self.emphasis_box, self.clear_low_box, self.change_accent_box):
+            ebox.addWidget(w)
+            w.toggled.connect(lambda on, w=w: self._extra_toggled(w.text(), on))
+        ew = QWidget()
+        ew.setLayout(ebox)
+        form.addRow("Rhythm", ew)
+        self.phrase_box.activated.connect(lambda _: self._extra_toggled(f"Phrase {self.phrase_box.currentData()} bars",
+                                                                        True))
+        self.shape_box.activated.connect(lambda _: self._slider_moved("shape", self.shape_box.currentData()))
+        self.fill_box.activated.connect(lambda _: self._slider_moved("fill", self.fill_box.currentData()))
         self.mode_label = QLabel("")
         self.mode_label.setStyleSheet(f"color: {MUTED}; font-size: 11px;")
         self.mode_label.setWordWrap(True)
@@ -533,8 +591,8 @@ class MainWindow(QMainWindow):
         self.density.valueChanged.connect(lambda v: self._slider_moved("density", DENSITY_STEPS[v]))
         self.dynamics.valueChanged.connect(lambda v: self._slider_moved("dynamics", DYNAMIC_STEPS[v]))
         self.pattern_box.activated.connect(lambda _: self._slider_moved("pattern", self.pattern_box.currentData()))
-        note = QLabel("Character, Forces and Density take effect at the\nnext Generate. Dynamics, Pattern, "
-                      "Note mode\nand Accents apply at once.")
+        note = QLabel("Character, Forces and Density take effect at the\nnext Generate. Everything below "
+                      "Dynamics\napplies at once.")
         note.setStyleSheet(f"color: {MUTED}; font-size: 11px;")
         form.addRow(note)
         box.setMaximumWidth(290)
@@ -653,10 +711,15 @@ class MainWindow(QMainWindow):
         ptn, sptn = self._master_and_overrides("pattern")
         nm, snm = self._master_and_overrides("note_mode")
         acc, sacc = self._master_and_overrides("accent")
+        shape, sshape = self._master_and_overrides("shape")
+        fill, sfill = self._master_and_overrides("fill")
         return dict(dynamics=dyn, section_dynamics=sdyn, pattern=ptn, section_patterns=sptn,
                     note_mode=nm, section_note_modes=snm, accent=acc, section_accents=sacc,
                     instrument_patterns=tuple(sorted(self.ipatterns.items())),
-                    part_patterns=tuple(sorted(self.ppatterns.items())), restrike_bars=self.restrike_box.isChecked())
+                    part_patterns=tuple(sorted(self.ppatterns.items())), restrike_bars=self.restrike_box.isChecked(),
+                    shape=shape, section_shapes=sshape, fill=fill, section_fills=sfill,
+                    phrase=self.phrase_box.currentData() or 4, pattern_emphasis=self.emphasis_box.isChecked(),
+                    clear_low=self.clear_low_box.isChecked(), change_accents=self.change_accent_box.isChecked())
 
     def gen_settings(self) -> Settings:
         forces, sforces = self._master_and_overrides("forces")
@@ -677,7 +740,7 @@ class MainWindow(QMainWindow):
                         melody_instrument=self.mel_inst_box.currentData(),
                         melody_double=self.mel_double_box.currentData() or "auto",
                         independent_bass=self.indep_box.isChecked() and self.bass_file is None,
-                        **self.render_settings())
+                        theme=self.theme_box.isChecked(), **self.render_settings())
 
     # ------------------------------------------------------------------ undo / redo
     def snapshot(self) -> EditState:
@@ -690,7 +753,10 @@ class MainWindow(QMainWindow):
                          self.indep_box.isChecked(),
                          self.top_box.currentData(), self.keep_box.isChecked(), self.seed.value(),
                          tuple(self.alts), tuple(self.locks), self.tab, self.dirty,
-                         tuple(tuple(r) for r in self.palts), tuple(self.ptabs))
+                         tuple(tuple(r) for r in self.palts), tuple(self.ptabs),
+                         phrase=self.phrase_box.currentData() or 4, emphasis=self.emphasis_box.isChecked(),
+                         clear_low=self.clear_low_box.isChecked(), change_accents=self.change_accent_box.isChecked(),
+                         theme=self.theme_box.isChecked())
 
     def record(self, label: str):
         if not self._restoring:
@@ -715,7 +781,8 @@ class MainWindow(QMainWindow):
             blocked = (self.tonic, self.mode, self.preset_box, self.forces, self.density, self.dynamics,
                        self.character, self.pattern_box, self.top_box, self.keep_box, self.seed, self.tabs,
                        self.restrike_box, self.indep_box, self.mel_inst_box, self.mel_double_box,
-                       self.note_mode_box, self.accent_box, self.pattern_tabs)
+                       self.note_mode_box, self.accent_box, self.pattern_tabs, self.shape_box, self.fill_box,
+                       self.phrase_box, self.emphasis_box, self.clear_low_box, self.change_accent_box, self.theme_box)
             for w in blocked:
                 w.blockSignals(True)
             self.mode.setCurrentText(st.mode)
@@ -730,6 +797,11 @@ class MainWindow(QMainWindow):
             self.values = thaw(st.values)
             self.ipatterns, self.ppatterns = dict(st.ipatterns), dict(st.ppatterns)
             self.restrike_box.setChecked(st.restrike)
+            self.phrase_box.setCurrentIndex(max(0, self.phrase_box.findData(st.phrase)))
+            self.emphasis_box.setChecked(st.emphasis)
+            self.clear_low_box.setChecked(st.clear_low)
+            self.change_accent_box.setChecked(st.change_accents)
+            self.theme_box.setChecked(st.theme)
             self.melody_file, self.bass_file = st.melody, st.bass
             self.indep_box.setChecked(st.independent)
             self._fill_melody_instruments(st.mel_inst)
@@ -1064,7 +1136,8 @@ class MainWindow(QMainWindow):
             w.blockSignals(False)
             lab.setText(names[v] + ("  (sections differ)" if mixed else ""))
         differ = []
-        for key, box, name in (("note_mode", self.note_mode_box, "Note mode"), ("accent", self.accent_box, "Accents")):
+        for key, box, name in (("note_mode", self.note_mode_box, "Note mode"), ("accent", self.accent_box, "Accents"),
+                               ("shape", self.shape_box, "Shape"), ("fill", self.fill_box, "Fill")):
             v, mixed = self._scope_value(key)
             box.blockSignals(True)
             box.setCurrentIndex(box.findData(v))
@@ -1111,9 +1184,11 @@ class MainWindow(QMainWindow):
                             self.ppatterns.pop(ln.id, None)
         where = "" if self.scope == ALL else f" ({self.scope})"
         name = {"character": "Character", "forces": "Forces", "density": "Density", "dynamics": "Dynamics",
-                "pattern": "Pattern", "note_mode": "Note mode", "accent": "Accents"}[key]
+                "pattern": "Pattern", "note_mode": "Note mode", "accent": "Accents", "shape": "Shape",
+                "fill": "Fill"}[key]
         shown = (pat.PATTERN_NAMES[value] if key == "pattern" else pat.NOTE_MODE_NAMES[value] if key == "note_mode"
-                 else pat.ACCENT_NAMES[value] if key == "accent" else CHARACTER_NAMES.get(value, value))
+                 else pat.ACCENT_NAMES[value] if key == "accent" else shp.SHAPE_NAMES[value] if key == "shape"
+                 else FILL_NAMES[value] if key == "fill" else CHARACTER_NAMES.get(value, value))
         self._show_scope_values()
         if key in RENDER_KEYS:
             self._apply_render()
@@ -1128,6 +1203,14 @@ class MainWindow(QMainWindow):
             return
         self.dirty = True
         self.record(name)
+        self._refresh()
+
+    def _extra_toggled(self, name: str, on: bool):
+        """A render-only option outside the per-section values (phrase, emphasis, low register, accents)."""
+        if self._restoring:
+            return
+        self._apply_render()
+        self.record(name + ("" if on else " off"))
         self._refresh()
 
     def _restrike_toggled(self, on: bool):
@@ -1414,7 +1497,8 @@ class MainWindow(QMainWindow):
         previous = {a: (o if isinstance(o, Orchestration) else None) for a, o in zip(APPROACHES, self.alts)}
         locks = {a: lk for a, lk in zip(APPROACHES, self.locks)}
         args = (chords, self.key())
-        kwargs = dict(seed=self.seed.value(), settings=settings, locks=locks, previous=previous)
+        kwargs = dict(seed=self.seed.value(), settings=settings, locks=locks, previous=previous,
+                      parallel=self.parallel)
         if not self.run_async:
             return self._generated(generate_all(*args, **kwargs))
         self._job = self._pool.submit(generate_all, *args, **kwargs)
@@ -1806,7 +1890,8 @@ class MainWindow(QMainWindow):
             ipatterns=st.ipatterns, ppatterns=st.ppatterns, restrike=st.restrike, melody=inp(st.melody),
             bass=inp(st.bass), mel_inst=st.mel_inst, mel_double=st.mel_double, independent=st.independent,
             top_voice=st.top_voice, keep=st.keep, seed=st.seed, alts=st.alts, locks=st.locks, tab=st.tab,
-            dirty=st.dirty, scope=self.scope, palts=st.palts, ptabs=st.ptabs)
+            dirty=st.dirty, scope=self.scope, palts=st.palts, ptabs=st.ptabs, phrase=st.phrase,
+            emphasis=st.emphasis, clear_low=st.clear_low, change_accents=st.change_accents, theme=st.theme)
 
     def save_project(self) -> Path | None:
         """Save to the project's file (asks where the first time). Returns the path, or None if cancelled."""
@@ -1856,7 +1941,8 @@ class MainWindow(QMainWindow):
         st = EditState(tuple(p.labels), p.tonic, p.mode, p.preset, frozenset(p.active), tuple(p.values),
                        tuple(p.ipatterns), tuple(p.ppatterns), p.restrike, entry(p.melody), entry(p.bass), p.mel_inst,
                        p.mel_double, p.independent, p.top_voice, p.keep, p.seed, tuple(p.alts), tuple(p.locks),
-                       p.tab, p.dirty, tuple(tuple(r) for r in p.palts), tuple(p.ptabs))
+                       p.tab, p.dirty, tuple(tuple(r) for r in p.palts), tuple(p.ptabs), phrase=p.phrase,
+                       emphasis=p.emphasis, clear_low=p.clear_low, change_accents=p.change_accents, theme=p.theme)
         self.tempo.blockSignals(True)
         self.tempo.setValue(int(round(p.tempo)))
         self.tempo.blockSignals(False)

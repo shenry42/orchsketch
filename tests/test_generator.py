@@ -239,3 +239,29 @@ def test_mode_must_be_safe_or_moderate():
     chords = ex.chords(["C"])
     with pytest.raises(ValueError):
         generate(chords, Key("C", "major"), mode="wild")  # wild mode is reserved for later (SPEC §6)
+
+
+# ---------------------------------------------------------------- v1.3: A, B and C in worker processes
+def test_parallel_generate_all_gives_exactly_the_same_result():
+    """The speed fix builds A, B and C in worker processes; the notes, reasons and reports are identical."""
+    from orchsketch import parallel
+    from orchsketch.patterns import EIGHTHS
+    for exp in EXPECTED[:1] + [e for e in EXPECTED if e.name.startswith("11_")]:
+        chords, key = load(exp)
+        st = Settings(pattern=EIGHTHS)
+        one = generate_all(chords, key, seed=1, settings=st)
+        many = generate_all(chords, key, seed=1, settings=st, parallel=True)
+        assert parallel.pool() is not None
+        assert many == one
+    # locked parts and a previous result travel to the workers too
+    locks = {"A": frozenset({"hn1"}), "B": frozenset(), "C": frozenset()}
+    again_one = generate_all(chords, key, seed=2, settings=st, locks=locks, previous=one)
+    again_many = generate_all(chords, key, seed=2, settings=st, locks=locks, previous=one, parallel=True)
+    assert again_many == again_one
+
+
+def test_parallel_falls_back_to_one_process(monkeypatch):
+    from orchsketch import parallel
+    chords, key = load(EXPECTED[0])
+    monkeypatch.setattr(parallel, "pool", lambda: None)
+    assert generate_all(chords, key, seed=1, parallel=True) == generate_all(chords, key, seed=1)

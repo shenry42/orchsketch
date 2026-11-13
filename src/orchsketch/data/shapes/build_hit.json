@@ -1,0 +1,30 @@
+{
+  "id": "build_hit",
+  "name": "Build and hit",
+  "order": 4,
+  "span": "clip",
+  "steps": [
+    {
+      "density": -3,
+      "dynamics": -3,
+      "pattern": -2,
+      "forces": -1
+    },
+    {
+      "density": -2,
+      "dynamics": -2,
+      "pattern": -1
+    },
+    {
+      "density": -1,
+      "dynamics": -1,
+      "dropout": true
+    },
+    {
+      "hit": true,
+      "dynamics": -1
+    }
+  ],
+  "last_bar_only": true,
+  "description": "Builds over the clip; the bar before the last drops out on its last 8th, and the last bar is one tutti hit (a half note, a step softer) on the downbeat."
+}

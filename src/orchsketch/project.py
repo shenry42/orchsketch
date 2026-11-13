@@ -130,6 +130,11 @@ class Project:
     scope: str = "all"
     palts: tuple = ((None, None, None),) * 3  # v1.2: per harmony alternative, patterns 2 and 3 (index 1, 2)
     ptabs: tuple = (0, 0, 0)  # v1.2: the pattern alternative shown per harmony alternative
+    phrase: int = 4  # v1.3: bars per phrase (shapes, fills)
+    emphasis: bool = False  # v1.3: pattern emphasis
+    clear_low: bool = False  # v1.3: clear low register
+    change_accents: bool = False  # v1.3: accent chord changes
+    theme: bool = False  # v1.3: unison/octave theme
     extra: dict = field(default_factory=dict)  # room for later versions
 
 

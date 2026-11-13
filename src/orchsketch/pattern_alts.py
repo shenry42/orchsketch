@@ -183,4 +183,25 @@ def describe(orch: Orchestration, insts=None) -> str:
         seen.setdefault(sec, [])
         if text not in seen[sec]:
             seen[sec].append(text)
-    return "; ".join(f"{sec}: {' / '.join(v)}" for sec, v in seen.items())
+    out = "; ".join(f"{sec}: {' / '.join(v)}" for sec, v in seen.items())
+    # v1.3: shapes, fills and rhythm options (render settings that change what you hear)
+    from . import shapes as shp
+    from .generator import FILL_NAMES, FILL_NONE
+    secs = sorted({insts[ln.instrument].section for ln in orch.sounding_lines})
+    extra = []
+    for name, get, names, none in (("shape", st.shape_for, shp.SHAPE_NAMES, shp.STEADY),
+                                   ("fill", st.fill_for, FILL_NAMES, FILL_NONE)):
+        vals = {sec: get(sec) for sec in secs}
+        if set(vals.values()) - {none}:
+            if len(set(vals.values())) == 1:
+                extra.append(f"{name} {names[next(iter(vals.values()))].lower()}")
+            else:
+                extra.append(f"{name} " + ", ".join(f"{sec} {names[v].lower()}" for sec, v in vals.items() if v != none))
+    if any(st.fill_for(sec) != FILL_NONE for sec in secs) or any(
+            shp.library()[st.shape_for(sec)].span == "phrase" for sec in secs):
+        extra.append(f"{st.phrase}-bar phrases")
+    extra += [t for on, t in ((st.pattern_emphasis, "pattern emphasis"), (st.clear_low, "clear low register"),
+                              (st.change_accents, "accented chord changes")) if on]
+    if extra:
+        out = (out + "; " if out else "") + ", ".join(extra)
+    return out

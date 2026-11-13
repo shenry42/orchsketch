@@ -166,9 +166,20 @@ class PartGrid(QTableWidget):
                 handle.setEnabled(False)
             self.setCellWidget(r, 3, handle)
             cells = orch.cells[ln.id]
-            starts = [n.start for n in orch.part(ln.id).notes]
+            pnotes = orch.part(ln.id).notes
+            starts = [n.start for n in pnotes]
             for i, p in enumerate(cells):
                 n_here = sum(chords[i].start <= t < chords[i].end for t in starts)
+                if p is not None and not any(n.start < chords[i].end and n.end > chords[i].start for n in pnotes):
+                    # an intensity shape rests this part here (v1.3)
+                    item = QTableWidgetItem(f"({note_name(p, name_style, key)})")
+                    item.setTextAlignment(Qt.AlignCenter)
+                    item.setBackground(QBrush(tint))
+                    item.setForeground(QBrush(QColor(MUTED)))
+                    item.setToolTip(f"{ln.label}: rests here (intensity shape); its voicing note would be "
+                                    f"{note_name(p, name_style, key)}")
+                    self.setItem(r, CTRL_COLS + i, item)
+                    continue
                 held = (i > 0 and p is not None and cells[i - 1] == p and chords[i - 1].label == chords[i].label
                         and chords[i - 1].end == chords[i].start)
                 text = "–" if p is None else ("~ " if held else "") + note_name(p, name_style, key) + (

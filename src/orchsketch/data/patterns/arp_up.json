@@ -1,0 +1,24 @@
+{
+  "id": "arp_up",
+  "name": "Arpeggio up (16ths)",
+  "short": "arp up",
+  "order": 40,
+  "family": "arp",
+  "kind": "grid",
+  "step": "16th",
+  "accents": [
+    0,
+    4,
+    8,
+    12
+  ],
+  "contour": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "note_mode": "chord",
+  "end_on_anchor": true,
+  "description": "16ths climbing the chord tones from the part's note, restarting every beat."
+}

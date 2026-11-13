@@ -1,0 +1,24 @@
+{
+  "id": "arp_r5810",
+  "name": "Root-5th-octave-10th (8ths)",
+  "short": "r-5-8-10",
+  "order": 45,
+  "family": "arp",
+  "kind": "grid",
+  "step": "8th",
+  "accents": [
+    0,
+    8
+  ],
+  "contour": [
+    0,
+    5,
+    8,
+    10
+  ],
+  "degrees": true,
+  "note_mode": "chord",
+  "end_on_anchor": true,
+  "down": "half_time",
+  "description": "The classic low-string arpeggio: the part's note, its 5th, octave and 10th (chord tones), in 8ths."
+}

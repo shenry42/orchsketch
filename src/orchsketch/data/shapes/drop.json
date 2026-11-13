@@ -1,0 +1,16 @@
+{
+  "id": "drop",
+  "name": "Drop",
+  "order": 3,
+  "span": "clip",
+  "steps": [
+    {},
+    {
+      "density": -3,
+      "dynamics": -2,
+      "pattern": -2,
+      "forces": -1
+    }
+  ],
+  "description": "The first half as set, then the texture drops to a thin, quiet layer."
+}

@@ -40,9 +40,16 @@ class Part:
     group: str | None = None  # parts with the same group move together on purpose
     name: str = ""  # display name; defaults to the instrument name
     doubles_at: tuple[str | None, ...] | None = None  # optional: the part it doubles at each chord
+    # (start, end) tick spans of runs, fills and pickups: notes starting there are checked for range only
+    # (SPEC §14: "endpoints only"); the generator keeps them in the scale and lands them on a chord tone
+    free: tuple[tuple[int, int], ...] = ()
 
     def __post_init__(self):
         object.__setattr__(self, "notes", tuple(sorted(self.notes, key=lambda n: (n.start, -n.pitch))))
+        object.__setattr__(self, "free", tuple(tuple(x) for x in self.free))
+        checked = self.notes if not self.free else tuple(
+            n for n in self.notes if not any(a <= n.start < b for a, b in self.free))
+        object.__setattr__(self, "cnotes", checked)  # the notes every check but range uses
         if self.role is not None and self.role not in ROLES:
             raise ValueError(f"part {self.id}: unknown role {self.role!r}")
 
@@ -253,7 +260,7 @@ class _Checker:
         bounds = {c.start for c in self.chords}
         events = []
         for pi, p in enumerate(self.parts):
-            for ni, nt in enumerate(p.notes):
+            for ni, nt in enumerate(p.cnotes):
                 bounds.update((nt.start, nt.end))
                 if nt.end > nt.start:
                     events.append((nt.start, nt.end, pi, ni, p, nt.pitch))
@@ -282,7 +289,7 @@ class _Checker:
     # --- line helpers (top note per part)
     @staticmethod
     def _top_at_start(part: Part, span: ChordSpan) -> int | None:
-        notes = [n for n in part.notes if n.start < span.end and n.end > span.start]
+        notes = [n for n in part.cnotes if n.start < span.end and n.end > span.start]
         if not notes:
             return None
         first = min(n.start for n in notes)
@@ -290,7 +297,7 @@ class _Checker:
 
     @staticmethod
     def _top_at_end(part: Part, span: ChordSpan) -> int | None:
-        notes = [n for n in part.notes if n.start < span.end and n.end > span.start]
+        notes = [n for n in part.cnotes if n.start < span.end and n.end > span.start]
         if not notes:
             return None
         last = max(n.start for n in notes)
@@ -299,7 +306,7 @@ class _Checker:
     @staticmethod
     def _line(part: Part) -> list[tuple[int, int]]:
         tops: dict[int, int] = {}
-        for n in part.notes:
+        for n in part.cnotes:
             tops[n.start] = max(tops.get(n.start, -1), n.pitch)
         return sorted(tops.items())
 
@@ -322,7 +329,7 @@ class _Checker:
 
     def check_defining_tones(self):
         for i, span in enumerate(self.chords):
-            notes = [(p, nt) for p in self.parts for nt in p.notes if nt.start < span.end and nt.end > span.start]
+            notes = [(p, nt) for p in self.parts for nt in p.cnotes if nt.start < span.end and nt.end > span.start]
             sym = span.label.symbol(self.key)
             if not notes:
                 self.add("defining_tone", f"{sym} at {position_text(span.start)}: nothing sounds.",
@@ -420,6 +427,8 @@ class _Checker:
                         continue
                     kind = "5ths" if iv1 == 7 else "octaves/unisons"
                     both_choir = all(self.inst[self.by_id[q].instrument].section == "choir" for q in (pa, pb))
+                    if both_choir and self._theme_pair(pa, pb) and iv1 == 0:
+                        continue  # choir voices singing one theme in unison/octaves are one line (v1.3)
                     if both_choir:
                         check = "choir_parallels"
                     elif self.linked_at(pa, pb, i, i + 1):
@@ -440,7 +449,7 @@ class _Checker:
             onsets = {}
             for p in self.parts:
                 tops: dict[int, int] = {}
-                for nt in p.notes:
+                for nt in p.cnotes:
                     if span.start <= nt.start < span.end:
                         tops[nt.start] = max(tops.get(nt.start, -1), nt.pitch)
                 if len(tops) > 1 and len(set(tops.values())) > 1:
@@ -470,10 +479,14 @@ class _Checker:
                                  [pa, pb], i, t2, [a1, a2, b1, b2])
                         break  # once per pair and chord
 
+    def _theme_pair(self, a: str, b: str) -> bool:
+        """Two melody parts (theme mode, or a melody and its octave doubling)."""
+        return self.by_id[a].role == "melody" and self.by_id[b].role == "melody"
+
     def check_doubled_outer(self):
         lt = (self.key.tonic_pc + 11) % 12
         for i, span in enumerate(self.chords):
-            sounding = [(p, nt.pitch) for p in self.parts for nt in p.notes if nt.start <= span.start < nt.end]
+            sounding = [(p, nt.pitch) for p in self.parts for nt in p.cnotes if nt.start <= span.start < nt.end]
             if not sounding:
                 continue
             chord_pcs = span.label.pcs()
@@ -508,12 +521,12 @@ class _Checker:
             # other parts' notes by pitch (v1.2 speed-up; same order of reports as before)
             others = [p for p in self.parts
                       if p.id != m.id and p.role != "melody" and not self.links.linked(p.id, m.id)]
-            pitches = {nt.pitch for p in others for nt in p.notes}
-            for mn in m.notes:
+            pitches = {nt.pitch for p in others for nt in p.cnotes}
+            for mn in m.cnotes:
                 if not any(mn.pitch + d in pitches or mn.pitch - d in pitches for d in clash):
                     continue
                 for p in others:
-                    for nt in p.notes:
+                    for nt in p.cnotes:
                         if nt.start < mn.end and nt.end > mn.start and abs(nt.pitch - mn.pitch) in clash:
                             t = max(nt.start, mn.start)
                             c = self.chord_at(t)

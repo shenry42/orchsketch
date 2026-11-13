@@ -20,6 +20,13 @@ A pattern file
                 Sustain's (the checker's chord-change rules see what the voicing search chose)
     passing     moderate mode may end the chord on a passing tone (the v1 8th and 16th ostinatos)
     choir       choirs may sing it
+    note_mode   optional: always this note mode, whatever the section's (arpeggios: "chord")
+    degrees     the contour counts chord degrees above the anchor instead of steps: 3 (a 3rd), 5 (a 5th),
+                8 (the octave), 10 (a 10th), each the nearest chord tone to that interval (v1.3 arpeggios)
+    anticipate  hits patterns: the next chord is struck an 8th early and tied over (v1.3 stabs); the
+                generator checks that 8th against what still sounds, and strikes on the beat where it fails
+    down        the next quieter pattern for intensity shapes (v1.3); default by family: 16ths -> 8ths ->
+                half-time -> Sustain
 
 Note modes (per section; SPEC §14 decision)
     chord   Chord tones (default): every step is the next chord tone, so every note is consonant.
@@ -50,6 +57,8 @@ ACCENTS_FILE = DATA / "accents.json"
 SUSTAIN, EIGHTHS, SIXTEENTHS, SIXTEENTHS_ALT, STABS, HALF_TIME = (
     "sustain", "8ths", "16ths", "16ths_alt", "stabs", "half_time")
 V1_PATTERNS = (SUSTAIN, EIGHTHS, SIXTEENTHS, SIXTEENTHS_ALT, STABS, HALF_TIME)
+V13_PATTERNS = ("arp_up", "arp_down", "arp_updown", "arp_8ths", "arp_rolling", "arp_r5810", "stabs_sync", "stabs_push",
+                "hit_downbeat")  # Milestone 8 (v1.3): arpeggios and hits
 ACCENT = 0.8  # unaccented notes play at 80% of the part's velocity
 EIGHTH, SIXTEENTH = PPQ // 2, PPQ // 4
 STAB_HITS = (0, PPQ + EIGHTH)  # beat 1 and the "and" of 2
@@ -86,6 +95,10 @@ class Pattern:
     passing: bool = False
     choir: bool = False
     description: str = ""
+    note_mode: str | None = None
+    degrees: bool = False
+    anticipate: bool = False
+    down: str | None = None
 
     @property
     def flat(self) -> bool:
@@ -121,7 +134,9 @@ def _parse_pattern(raw: dict, name: str) -> Pattern:
             accents=None if accents is None else tuple(int(a) * SIXTEENTH for a in accents),
             contour=contour, octaves=octaves, min_step=int(raw.get("min_step", 1)),
             end_on_anchor=bool(raw.get("end_on_anchor", False)), passing=bool(raw.get("passing", False)),
-            choir=bool(raw.get("choir", False)), description=str(raw.get("description", "")))
+            choir=bool(raw.get("choir", False)), description=str(raw.get("description", "")),
+            note_mode=raw.get("note_mode"), degrees=bool(raw.get("degrees", False)),
+            anticipate=bool(raw.get("anticipate", False)), down=raw.get("down"))
     except (KeyError, TypeError, ValueError) as exc:
         if isinstance(exc, PatternError):
             raise
@@ -130,6 +145,12 @@ def _parse_pattern(raw: dict, name: str) -> Pattern:
         raise PatternError(f"{name}: hits are 16th positions 0-15 and start at 0")
     if p.passing and kind != "grid":
         raise PatternError(f"{name}: only grid patterns can end on a passing tone")
+    if p.note_mode is not None and p.note_mode not in NOTE_MODES:
+        raise PatternError(f"{name}: note_mode must be one of {', '.join(NOTE_MODES)}")
+    if p.degrees and any(c not in (0, 3, 5, 8, 10) for c in p.contour):
+        raise PatternError(f"{name}: degrees are 0, 3, 5, 8 or 10")
+    if p.anticipate and kind != "hits":
+        raise PatternError(f"{name}: only hits patterns can anticipate")
     if p.choir and (not p.flat or (kind == "grid" and p.step < EIGHTH)):
         raise PatternError(f"{name}: choirs sing only patterns that repeat their note in 8ths or longer")
     return p
@@ -151,6 +172,9 @@ def library() -> dict[str, Pattern]:
     missing = set(V1_PATTERNS) - out.keys()
     if missing:
         raise PatternError(f"data/patterns is missing {', '.join(sorted(missing))}")
+    for p in out.values():
+        if p.down is not None and p.down not in out:
+            raise PatternError(f"{p.id}: down pattern {p.down!r} doesn't exist")
     return dict(sorted(out.items(), key=lambda kv: (kv[1].order, kv[0])))
 
 
@@ -196,8 +220,23 @@ def grid_patterns() -> tuple[str, ...]:
     return tuple(k for k, p in library().items() if p.kind == "grid")
 
 
-def soft(velocity: int) -> int:
-    return max(1, round(velocity * ACCENT))
+FAMILY_DOWN = {"16ths": "8ths", "arp": "8ths", "8ths": "half_time", "pulse": "sustain", "hit": "sustain"}
+
+
+def step_down(pattern: str, steps: int, choir: bool = False) -> str:
+    """The pattern `steps` levels quieter (intensity shapes): its own `down`, else its family's next pattern
+    (16ths -> 8ths -> half-time -> Sustain). A choir only goes to patterns it can sing (else Sustain)."""
+    lib = library()
+    for _ in range(max(0, steps)):
+        p = lib[pattern]
+        if p.kind == "sustain":
+            break
+        pattern = p.down or FAMILY_DOWN.get(p.family, SUSTAIN)
+    return pattern if allowed(pattern, choir) else SUSTAIN
+
+
+def soft(velocity: int, factor: float = ACCENT) -> int:
+    return max(1, round(velocity * factor))
 
 
 def _grid(start: int, end: int, step: int) -> list[tuple[int, int]]:
@@ -273,11 +312,32 @@ def _snap(q: int, chord_pcs: set[int], direction: int) -> int:
     return q
 
 
-def make_mapper(anchor: int, chord_pcs: set[int], scale_pcs: set[int], mode: str, ok, min_step: int = 1):
+DEGREE_TARGETS = {3: (3, 4, 2, 5), 5: (7, 6, 8, 5), 8: (12,), 10: (15, 16, 14, 17)}
+
+
+def degree_pitch(anchor: int, degree: int, chord_pcs: set[int]) -> int | None:
+    """A chord tone at this degree above the anchor (3rd, 5th, octave, 10th), the interval's usual sizes first."""
+    if degree == 0:
+        return anchor
+    for d in DEGREE_TARGETS[degree]:
+        if (anchor + d) % 12 in chord_pcs or d == 12:
+            return anchor + d
+    return None
+
+
+def make_mapper(anchor: int, chord_pcs: set[int], scale_pcs: set[int], mode: str, ok, min_step: int = 1,
+                degrees: bool = False):
     """mapper(offset, octave, strong) -> pitch for one part at one chord."""
     if mode not in NOTE_MODES:
         raise PatternError(f"unknown note mode {mode!r}")
     cache: dict = {}
+    if degrees:  # arpeggio degrees above the anchor; an octave lower if out of range, else the anchor
+        def dmapper(off: int, octave: int, strong: bool) -> int:
+            if off not in cache:
+                q = degree_pitch(anchor, off, chord_pcs)
+                cache[off] = next((x for x in (() if q is None else (q, q - 12)) if ok(x)), anchor)
+            return cache[off]
+        return dmapper
 
     def resolve(o: int, strong: bool) -> int | None:
         if o == 0:
@@ -309,7 +369,8 @@ def make_mapper(anchor: int, chord_pcs: set[int], scale_pcs: set[int], mode: str
 
 # ---------------------------------------------------------------- rendering
 def render(pattern: str, pitch: int, start: int, end: int, velocity: int, *, alt: int | None = None,
-           passing: int | None = None, mapper=None, grouping: str | None = None) -> list[Note]:
+           passing: int | None = None, mapper=None, grouping: str | None = None, soft_factor: float = ACCENT
+           ) -> list[Note]:
     """Notes for one part at one chord.
 
     mapper(offset, octave, strong) gives the pitch of a contour step (see make_mapper); without one, the
@@ -346,11 +407,12 @@ def render(pattern: str, pitch: int, start: int, end: int, velocity: int, *, alt
             q = pitch if not off and not octave else mapper(off, octave, accented or s % PPQ == 0)
         if not accented and gate < 1:
             e = s + max(SIXTEENTH // 2, round((e - s) * gate))
-        notes.append(Note(q, s, e, velocity if accented else soft(velocity)))
+        notes.append(Note(q, s, e, velocity if accented else soft(velocity, soft_factor)))
     if passing is not None and p.passing and len(notes) >= 4:
         # the last 8th of the chord (one 8th or two 16ths) becomes the passing tone
         n_last = max(1, EIGHTH // p.step)
-        notes = notes[:-n_last] + [Note(passing, n.start, n.end, soft(velocity)) for n in notes[-n_last:]]
+        notes = notes[:-n_last] + [Note(passing, n.start, n.end, soft(velocity, soft_factor))
+                                   for n in notes[-n_last:]]
     return notes
 
 

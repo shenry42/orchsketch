@@ -11,6 +11,8 @@ tests\data\benchmark\, saved to Documents\OrchSketch\Projects\Benchmark\, report
 Then (v1.2) the Phase 2 ear-test set (SPEC §14, tests\data\phase2_ear_tests.json): each progression with the
 v1.1 baseline and three pattern-engine setups, plus pattern alternatives 2 and 3 on two of them, saved to
 Documents\OrchSketch\Projects\Benchmark\Phase2\ and added to the same report, with generation times.
+Then (v1.3) the Milestone 8 ear-test set (tests\data\phase2b_ear_tests.json): one project per case in
+Documents\OrchSketch\Projects\Benchmark\Phase2b\, opening on the harmony tab to rate.
 A chord expected as "unrecognized" must come out unrecognized and is then typed in by hand, as you would
 (its "correct_to" symbol), before Confirm all.
 
@@ -40,6 +42,8 @@ BENCHMARK = Path.home() / "Documents" / "OrchSketch" / "Projects" / "Benchmark"
 BENCHMARK_REPORT = ROOT / "benchmark_report.txt"
 PHASE2 = BENCHMARK / "Phase2"
 PHASE2_SET = DATA / "phase2_ear_tests.json"
+PHASE2B = BENCHMARK / "Phase2b"
+PHASE2B_SET = DATA / "phase2b_ear_tests.json"  # Milestone 8 (v1.3)
 _APP = None  # the off-screen QApplication
 
 
@@ -79,11 +83,24 @@ def _configure(setup: dict):
             for key, v in vals.items():
                 w._slider_moved(key, v)
         w.set_scope("all")
+        for lid, pt in setup.get("parts", {}).items():
+            w.set_part_pattern(lid, pt)
+        opts = setup.get("options", {})
+        for key in ("shape", "fill"):  # every section
+            if key in opts:
+                w._slider_moved(key, opts[key])
+        if "phrase" in opts:
+            w.phrase_box.setCurrentIndex(w.phrase_box.findData(opts["phrase"]))
+            w.phrase_box.activated.emit(w.phrase_box.currentIndex())
+        for key, box in (("emphasis", "emphasis_box"), ("clear_low", "clear_low_box"),
+                         ("change_accents", "change_accent_box"), ("theme", "theme_box")):
+            if key in opts:
+                getattr(w, box).setChecked(bool(opts[key]))
     return go
 
 
 def run_one(exp_path: Path, with_files: bool, folder: Path, *, stem: str | None = None, configure=None,
-            ptab: int = 0, title: str | None = None) -> tuple[bool, list[str]]:
+            ptab: int = 0, title: str | None = None, tab: int = 0) -> tuple[bool, list[str]]:
     import time
 
     data = exp_path.parent
@@ -148,6 +165,8 @@ def run_one(exp_path: Path, with_files: bool, folder: Path, *, stem: str | None 
         w.generate()
         t_gen = time.perf_counter() - t
         t = time.perf_counter()
+        if tab:
+            w.set_tab(tab)  # the project opens on the tab to rate
         if ptab:
             w.set_pattern_tab(ptab)
         t_pat = time.perf_counter() - t
@@ -227,6 +246,30 @@ def phase2(only: list[str] | None = None, folder: Path = PHASE2) -> tuple[int, i
     return passed, total, out
 
 
+def phase2b(only: list[str] | None = None, folder: Path = PHASE2B) -> tuple[int, int, list[str]]:
+    """Milestone 8 (v1.3) ear-test projects: one per case, one score each on the named harmony tab."""
+    folder.mkdir(parents=True, exist_ok=True)
+    doc = json.loads(PHASE2B_SET.read_text(encoding="utf-8"))
+    out = ["Milestone 8 ear-test set (tests\\data\\phase2b_ear_tests.json). Projects: " + str(folder),
+           "Each project opens on the harmony tab to rate; give it one score from 1 to 5.", ""]
+    passed = total = 0
+    for case in doc["cases"]:
+        if only and case["id"] not in only:
+            continue
+        expf = DATA / case["expected"]
+        exp = json.loads(expf.read_text(encoding="utf-8"))
+        name = f"{case['id']}_{str(exp['test'])}" + ("_files" if case["files"] else "") + f"_rate_{case['tab']}"
+        title = (f"{case['id']} (rate {case['tab']}): test {exp['test']}"
+                 f"{' + melody and bass files' if case['files'] else ''} ({exp['file']}) - {case['name']}")
+        ok, lines = run_one(expf, case["files"], folder, stem=name, configure=_configure(case), title=title,
+                            tab="ABC".index(case["tab"]))
+        total += 1
+        passed += ok
+        out += lines + [""]
+        print(lines[0], "-", "pass" if ok else "FAIL", flush=True)
+    return passed, total, out
+
+
 def main(only: list[str] | None = None, folder: Path = TESTSET, report: Path | None = REPORT,
          data: Path = DATA, with_phase2: bool = False) -> bool:
     from PySide6.QtWidgets import QApplication
@@ -252,6 +295,10 @@ def main(only: list[str] | None = None, folder: Path = TESTSET, report: Path | N
         out += lines
         passed += p2
         total += t2
+        p3, t3, lines = phase2b()
+        out += lines
+        passed += p3
+        total += t3
     out.append(f"AUTOMATIC CHECKS: {passed}/{total} runs pass" + ("  -> OK" if passed == total else "  -> FAIL"))
     out.append("Next: the ear test. Open each project in the app and score A, B and C from 1 to 5"
                + (" (Phase2: the shown alternative)." if with_phase2 else "."))

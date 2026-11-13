@@ -1,0 +1,25 @@
+{
+  "id": "pulse_bed",
+  "name": "Pulse bed",
+  "order": 7,
+  "span": "layers",
+  "steps": [
+    {
+      "sections": 1,
+      "entering": -1
+    },
+    {
+      "sections": 2,
+      "entering": -1
+    },
+    {
+      "sections": 3,
+      "entering": -1
+    },
+    {
+      "sections": 4,
+      "entering": -1
+    }
+  ],
+  "description": "Adds a section every 4 bars (strings, then brass, woodwinds, choir), each new section a step softer for its first 4 bars; clips under 16 bars add one every quarter of the clip. Pair it with a pulse or ostinato pattern."
+}

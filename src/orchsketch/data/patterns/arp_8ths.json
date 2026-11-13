@@ -1,0 +1,22 @@
+{
+  "id": "arp_8ths",
+  "name": "Arpeggio up (8ths)",
+  "short": "arp 8",
+  "order": 43,
+  "family": "arp",
+  "kind": "grid",
+  "step": "8th",
+  "accents": [
+    0,
+    8
+  ],
+  "contour": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "note_mode": "chord",
+  "end_on_anchor": true,
+  "description": "8ths climbing three chord tones above the part's note, every half bar."
+}

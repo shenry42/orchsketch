@@ -1,0 +1,32 @@
+{
+  "id": "arp_rolling",
+  "name": "Rolling arpeggio (16ths)",
+  "short": "arp roll",
+  "order": 44,
+  "family": "arp",
+  "kind": "grid",
+  "step": "16th",
+  "accents": [
+    0,
+    4,
+    8,
+    12
+  ],
+  "contour": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    5,
+    4,
+    3,
+    2,
+    1
+  ],
+  "note_mode": "chord",
+  "end_on_anchor": true,
+  "description": "16ths rolling up six chord tones and back in a 12-note wave that crosses the beats; mirrored where it would leave the range."
+}

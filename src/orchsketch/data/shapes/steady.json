@@ -1,0 +1,10 @@
+{
+  "id": "steady",
+  "name": "Steady",
+  "order": 0,
+  "span": "clip",
+  "steps": [
+    {}
+  ],
+  "description": "No change: every bar plays the settings as they are."
+}

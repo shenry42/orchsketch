@@ -1,0 +1,168 @@
+{
+  "about": "Milestone 8 (v1.3) ear-test set: scripts\\benchmark.bat builds one project per case in Documents\\OrchSketch\\Projects\\Benchmark\\Phase2b\\. Default preset (Full epic), safe, seed 1, the harmony tab named in the case (the project opens on it). Rate that tab once, 1-5, in tests/ratings.csv (test = case id, alternative = the tab).",
+  "cases": [
+    {
+      "id": "T1",
+      "expected": "01_epic_staple.expected.json",
+      "files": false,
+      "tab": "B",
+      "name": "Strings 8ths rising, 3+3+2 accents (v1.2's favourite) + Pattern emphasis",
+      "sections": {
+        "strings": {
+          "pattern": "8ths_rise",
+          "accent": "3+3+2"
+        }
+      },
+      "options": {
+        "emphasis": true
+      }
+    },
+    {
+      "id": "T2",
+      "expected": "01_epic_staple.expected.json",
+      "files": false,
+      "tab": "A",
+      "name": "Same as T1 on harmony A + Clear low register (A used to hide the rhythm)",
+      "sections": {
+        "strings": {
+          "pattern": "8ths_rise",
+          "accent": "3+3+2"
+        }
+      },
+      "options": {
+        "emphasis": true,
+        "clear_low": true
+      }
+    },
+    {
+      "id": "T3",
+      "expected": "benchmark/B01.expected.json",
+      "files": true,
+      "tab": "B",
+      "name": "16ths pendulum, Hybrid, under your melody (v1.2's P5c sounded chaotic)",
+      "sections": {
+        "strings": {
+          "pattern": "16ths_pendulum",
+          "note_mode": "hybrid",
+          "accent": "4+4+3+3+2"
+        }
+      },
+      "options": {}
+    },
+    {
+      "id": "T4",
+      "expected": "benchmark/B01.expected.json",
+      "files": true,
+      "tab": "B",
+      "name": "Shape: Build and hit (strings 8ths, brass half-time)",
+      "sections": {},
+      "options": {
+        "shape": "build_hit",
+        "emphasis": true
+      }
+    },
+    {
+      "id": "T5",
+      "expected": "11_sixteen_bars.expected.json",
+      "files": true,
+      "tab": "B",
+      "name": "Shape: 4-bar phrase + 16th runs into each phrase (strings only)",
+      "sections": {
+        "strings": {
+          "fill": "run"
+        }
+      },
+      "options": {
+        "shape": "phrase4",
+        "emphasis": true
+      }
+    },
+    {
+      "id": "T6",
+      "expected": "11_sixteen_bars.expected.json",
+      "files": false,
+      "tab": "B",
+      "name": "Shape: Breakdown in the middle 8 bars",
+      "sections": {},
+      "options": {
+        "shape": "breakdown"
+      }
+    },
+    {
+      "id": "T7",
+      "expected": "11_sixteen_bars.expected.json",
+      "files": false,
+      "tab": "B",
+      "name": "Shape: Pulse bed (a section every 4 bars), brass syncopated stabs",
+      "sections": {
+        "brass": {
+          "pattern": "stabs_sync"
+        },
+        "woodwinds": {
+          "pattern": "8ths"
+        }
+      },
+      "options": {
+        "shape": "pulse_bed",
+        "emphasis": true
+      }
+    },
+    {
+      "id": "T8",
+      "expected": "05_seventh_chords.expected.json",
+      "files": false,
+      "tab": "B",
+      "name": "Strings arpeggio up-down (16ths), 7th chords",
+      "sections": {
+        "strings": {
+          "pattern": "arp_updown"
+        }
+      },
+      "options": {
+        "emphasis": true
+      }
+    },
+    {
+      "id": "T9",
+      "expected": "01_epic_staple.expected.json",
+      "files": false,
+      "tab": "B",
+      "name": "Cellos root-5th-octave-10th arpeggio (8ths) under the strings' 8ths",
+      "sections": {},
+      "options": {
+        "emphasis": true
+      },
+      "parts": {
+        "vc": "arp_r5810",
+        "vc-a": "arp_r5810",
+        "vc-solo": "arp_r5810"
+      }
+    },
+    {
+      "id": "T10",
+      "expected": "04_harmonic_minor_v.expected.json",
+      "files": false,
+      "tab": "B",
+      "name": "Brass stabs with anticipation (the next chord an 8th early)",
+      "sections": {
+        "brass": {
+          "pattern": "stabs_push"
+        }
+      },
+      "options": {
+        "emphasis": true
+      }
+    },
+    {
+      "id": "T11",
+      "expected": "01_epic_staple.expected.json",
+      "files": false,
+      "tab": "B",
+      "name": "Theme in octaves (your clip's top note) in horns, trombones, cellos, choir",
+      "sections": {},
+      "options": {
+        "theme": true
+      }
+    }
+  ]
+}

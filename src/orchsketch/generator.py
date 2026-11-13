@@ -36,7 +36,8 @@ from . import patterns as pat
 from .analysis.chords import QUALITIES, ChordLabel
 from .checker import ChordSpan, Issue, Part, Report, check, required_tones
 from .instruments import SECTIONS, Instrument, instruments as builtin_instruments
-from .midi_io import TOLERANCE, Note, position_text
+from . import shapes as shp
+from .midi_io import BAR, PPQ, TOLERANCE, Note, position_text
 from .rules import MODERATE, SAFE, WARNING, Rules, rules as builtin_rules
 from .theory import Key, note_name
 
@@ -66,6 +67,10 @@ PARALLEL_COST = 8.0  # parallel 5ths/8ves between independent lines (a checker w
 SAME_AS_BEFORE_COST = 2.0  # "Regenerate" pushes away from the previous results
 REGEN_MEMORY = 8  # Regenerate avoids this many earlier variations (not just the last one)
 KEEP_GROUP = "keep"
+
+
+FILL_NONE, FILL_RUN, FILL_PICKUP, FILL_DROPOUT = "none", "run", "pickup", "dropout"
+FILLS = (FILL_NONE, FILL_RUN, FILL_PICKUP, FILL_DROPOUT)
 
 
 class GenerationError(Exception):
@@ -141,6 +146,7 @@ LINES: tuple[Line, ...] = (
     Line("ch-b", "choir_bass", "Choir bass", "ChB", ("B",), role="bass", forces=_ALL),  # octave chosen per chord
 )
 LINE_BY_ID = {ln.id: ln for ln in LINES}
+LINE_ORDER = {ln.id: i for i, ln in enumerate(LINES)}  # score order
 LINES_A = tuple(ln for ln in LINES if ln.id not in ("picc", "tpt3") and "section" in ln.forces)  # M3 list
 CHOIR_BASS = "ch-b"
 CHOIR_IDS = ("ch-s", "ch-a", "ch-t", CHOIR_BASS)
@@ -316,10 +322,21 @@ class Settings:
     melody_instrument: str | None = None  # None: chosen by register and approach
     melody_double: str = "auto"  # auto / off / up / down
     independent_bass: bool = False  # moderate only: a bass line moving by step toward the next chord
+    # v1.3 (Milestone 8); every default reproduces v1.2
+    shape: str = shp.STEADY  # intensity shape (shapes.py), master
+    section_shapes: tuple = ()  # (section, shape) pairs
+    phrase: int = 4  # bars per phrase: "phrase" shapes and phrase-end fills
+    fill: str = "none"  # phrase-end fill (FILLS), master
+    section_fills: tuple = ()  # (section, fill) pairs
+    pattern_emphasis: bool = False  # patterned parts a dynamic step louder, sustained parts under them softer
+    clear_low: bool = False  # grid patterns below C3 one level simpler (keeps the low register from blurring)
+    change_accents: bool = False  # the first note at every chord change accented
+    theme: bool = False  # unison/octave theme: melody (or top voice) in octaves across horns, low brass, cellos, choir
 
     def __post_init__(self):
         for f in ("section_dynamics", "section_character", "section_patterns", "instrument_patterns",
-                  "part_patterns", "section_note_modes", "section_accents", "part_variants"):
+                  "part_patterns", "section_note_modes", "section_accents", "part_variants", "section_shapes",
+                  "section_fills"):
             object.__setattr__(self, f, _pairs(getattr(self, f)))
         if self.dynamics not in DYNAMICS or any(d not in DYNAMICS for _, d in self.section_dynamics):
             raise ValueError("dynamics must be one of " + " ".join(DYNAMICS))
@@ -336,6 +353,12 @@ class Settings:
         for _, v in self.part_variants:
             if not (isinstance(v, tuple) and len(v) == 2 and v[0] in pat.PATTERNS and v[1] in pat.ACCENTS):
                 raise ValueError("a pattern variant is (pattern, accent grouping)")
+        if self.shape not in shp.SHAPES or any(x not in shp.SHAPES for _, x in self.section_shapes):
+            raise ValueError("unknown intensity shape")
+        if self.phrase not in shp.PHRASES:
+            raise ValueError("phrase must be 2, 4 or 8 bars")
+        if self.fill not in FILLS or any(x not in FILLS for _, x in self.section_fills):
+            raise ValueError("fill must be one of " + " ".join(FILLS))
         if self.melody_double not in DOUBLINGS:
             raise ValueError(f"melody doubling must be one of {DOUBLINGS}")
         for f in ("melody", "bass"):
@@ -366,6 +389,12 @@ class Settings:
         if instrument is not None and instrument in dict(self.instrument_patterns):
             return dict(self.instrument_patterns)[instrument]
         return dict(self.section_patterns).get(section, self.pattern)
+
+    def shape_for(self, section: str) -> str:
+        return dict(self.section_shapes).get(section, self.shape)
+
+    def fill_for(self, section: str) -> str:
+        return dict(self.section_fills).get(section, self.fill)
 
     def note_mode_for(self, section: str) -> str:
         return dict(self.section_note_modes).get(section, self.note_mode)
@@ -846,7 +875,8 @@ def _ties(spans: list[ChordSpan]) -> list[bool]:
 
 def build_parts(lines: list[Line], spans: list[ChordSpan], cells: dict[str, list[int | None]],
                 labels: dict[str, list[str | None]], velocity: int, insts: dict[str, Instrument],
-                tie: list[bool] | None = None, notes: dict[str, list[Note]] | None = None) -> list[Part]:
+                tie: list[bool] | None = None, notes: dict[str, list[Note]] | None = None,
+                free: dict[str, list[tuple[int, int]]] | None = None) -> list[Part]:
     """Checker parts from per-chord pitches and voice labels.
 
     A line doubles another when, at every chord where it sounds, the other sounds the same voice label on
@@ -908,7 +938,7 @@ def build_parts(lines: list[Line], spans: list[ChordSpan], cells: dict[str, list
             vs = {lb[i] for i in sounding} if sounding else {base[ln.id]}
             group = "low" if vs and vs <= {"B", "L5"} else None
         parts.append(Part(ln.id, ln.instrument, tuple(notes), ln.role, doubles, group, ln.label,
-                          tuple(local[ln.id]) if len(spans) > 1 else None))
+                          tuple(local[ln.id]) if len(spans) > 1 else None, tuple((free or {}).get(ln.id, ()))))
     return parts
 
 
@@ -1314,8 +1344,9 @@ def generate(chords: list[ChordSpan], key: Key, *, seed: int = 1, ensemble: Ense
     kw = dict(seed=seed, ensemble=ensemble, mode=mode, rules=rules, instruments=instruments, approach=approach,
               settings=settings, locked=locked, locked_ids=locked_ids, variation=variation, avoid=avoid)
     has_melody = settings is not None and bool(settings.melody)
+    theme = settings is not None and settings.theme
     first = None
-    for attempt in range(MELODY_ATTEMPTS if has_melody else 1):
+    for attempt in range(THEME_ATTEMPTS if theme else MELODY_ATTEMPTS if has_melody else 1):
         try:
             return _generate(chords, key, melody_attempt=attempt, **kw)
         except _NoMorePlans as exc:
@@ -1324,7 +1355,7 @@ def generate(chords: list[ChordSpan], key: Key, *, seed: int = 1, ensemble: Ense
             break
         except GenerationError as exc:
             first = first or exc
-    iid = settings.melody_instrument if has_melody else None
+    iid = settings.melody_instrument if has_melody and not theme else None
     if iid is not None and str(first).startswith("These chords can't be connected"):
         insts = instruments or builtin_instruments()
         if iid in insts and insts[iid].section == "choir":
@@ -1376,7 +1407,29 @@ def _generate(chords: list[ChordSpan], key: Key, *, seed: int = 1, ensemble: Ens
     # the melody (SPEC §5 step 3): one instrument by register (plus an optional octave doubling)
     drop: set[str] = set()  # model lines replaced by the melody
     mel = None
-    if settings.melody:
+    if settings.theme:
+        mel = _theme_plan(settings, ens, insts, spans, key, melody_attempt)
+        if mel is None:
+            info["theme"] = "Theme mode: no horns, trombones, cellos or choir can play it in range, so it is voiced as usual"
+            if settings.melody:
+                mel = _melody_plan(ap, settings, ens, insts, spans, melody_attempt)
+                if mel is not None:
+                    for ln in mel["lines"]:
+                        pos = next((k for k, x in enumerate(all_lines) if x.instrument == ln.instrument),
+                                   len(all_lines))
+                        all_lines.insert(pos, ln)
+                    drop |= mel["drop"]
+                    info["melody"] = mel["text"]
+        else:
+            all_lines = [ln for ln in all_lines if ln.id not in {x.id for x in mel["lines"]}]
+            mel["theme"] = True
+            for ln in mel["lines"]:
+                pos = next((k for k, x in enumerate(all_lines) if LINE_ORDER.get(x.id, 999) > LINE_ORDER[ln.id]),
+                           len(all_lines))
+                all_lines.insert(pos, ln)
+            drop |= mel["drop"]
+            info["melody"] = mel["text"]
+    elif settings.melody:
         mel = _melody_plan(ap, settings, ens, insts, spans, melody_attempt)
         if mel is not None:
             for ln in mel["lines"]:
@@ -1408,10 +1461,10 @@ def _generate(chords: list[ChordSpan], key: Key, *, seed: int = 1, ensemble: Ens
                 fixed_lines.append(ln)
                 fcells[ln.id] = list(mel["cells"][ln.id])
                 flabels[ln.id] = ["mel" if p is not None else None for p in fcells[ln.id]]
-                ffigs[ln.id] = list(mel["figures"])
+                ffigs[ln.id] = list(mel["figures"][ln.id] if mel.get("theme") else mel["figures"])
     model_lines = approach_lines(ap, ens, insts, exclude=set(fcells) | drop, keep=keep)
     extras: dict = {}
-    if mel is not None:
+    if mel is not None and not mel.get("theme"):
         extras["mel_lo"] = list(mel["lo"])
     # the bass line (SPEC §5 step 2): a bass file, or moderate mode's independent line, doubled in octaves
     bass = _bass_plan(settings, model_lines, insts, spans, key)
@@ -1445,7 +1498,8 @@ def _generate(chords: list[ChordSpan], key: Key, *, seed: int = 1, ensemble: Ens
     labels: dict[str, list[str | None]] = {ln.id: [None] * n for ln in all_lines}
     voicing: list[dict] = [{} for _ in range(n)]
     if model_lines:
-        setup = _Setup(model_lines, insts, ap, need_bass=not has_fixed, settings=settings)
+        setup = _Setup(model_lines, insts, ap, need_bass=not has_fixed or (bool(mel and mel.get("theme")) and bass is None),
+                       settings=settings)
         prev = None
         if avoid is not None:  # the result being replaced and the earlier variations before it
             prev = [{ln.id: cells_[ln.id] for ln in model_lines if ln.id in cells_}
@@ -1637,6 +1691,131 @@ def _melody_plan(ap: Approach, settings: Settings, ens: Ensemble, insts, spans, 
             "host": host}
 
 
+THEME_GROUPS = (("horn",), ("tenor_trombone",), ("cellos",), ("choir_soprano", "choir_alto", "choir_tenor"))
+THEME_FLOOR = 48  # instruments play the theme at C3 or above (the low-interval limit of a minor 3rd)
+THEME_DROP_ORDER = ("tenor_trombone", "cellos", "choir")  # plans after the first leave these out, in turn
+THEME_ATTEMPTS = 4
+THEME_NAMES = {"horn": "horns", "tenor_trombone": "trombones", "cellos": "cellos", "choir": "choir"}
+
+
+def _theme_notes(settings: Settings, spans: list[ChordSpan]) -> list[Note]:
+    """The theme: the melody file, else the chord clip's top note per chord (tied while it repeats)."""
+    if settings.melody:
+        return clip_notes(settings.melody, spans[-1].end)
+    out: list[Note] = []
+    for sp, top in zip(spans, settings.tops):
+        if top is None:
+            continue
+        if out and out[-1].pitch == top and out[-1].end == sp.start:
+            out[-1] = Note(top, out[-1].start, sp.end, out[-1].velocity)
+        else:
+            out.append(Note(top, sp.start, sp.end, VELOCITY))
+    return out
+
+
+def _best_shift(notes: list[Note], inst: Instrument, moderate: bool, below: int | None = None,
+                floor: int = 0, clear=None) -> int | None:
+    """The octave shift that puts every theme note in range (comfortable, or playable in moderate mode) and at
+    or above `floor`, nearest the instrument's comfortable middle; at most `below` (choir voices stay in order)."""
+    lo, hi = inst.comfortable
+    mid = (lo + hi) / 2
+    mean = sum(n.pitch for n in notes) / len(notes)
+    low = min(n.pitch for n in notes)
+    ok = [k for k in range(-48, 37, 12) if (below is None or k <= below) and low + k >= floor
+          and _fits(notes, inst, moderate, k) and (clear is None or clear(k))]
+    # above G3 where it fits (clear of the bass register), then nearest the instrument's middle
+    return min(ok, key=lambda k: (low + k < DOUBLE_DOWN_FLOOR, abs(mean + k - mid), -k)) if ok else None
+
+
+def _theme_plan(settings: Settings, ens: Ensemble, insts, spans, key: Key, attempt: int = 0) -> dict | None:
+    """Unison/octave theme mode (SPEC §14 milestone 8): the theme in octaves across horns, tenor trombones,
+    cellos and choir, one line per instrument (choir soprano, alto and tenor; the choir bass sings the bass),
+    each in the octave that fits its range, instruments at C3 or above.
+    The rest of the ensemble is voiced around it. A group that can't play every note of the theme in one octave
+    is left out; later plans leave out trombones, then cellos, then the choir."""
+    notes = _theme_notes(settings, spans)
+    if not notes:
+        return None
+    if attempt >= THEME_ATTEMPTS:
+        raise _NoMorePlans("no more theme plans")
+    left_out = set(THEME_DROP_ORDER[:attempt])
+    available = ensemble_lines(ens, insts)
+    by_inst: dict[str, list[Line]] = {}
+    for ln in available:
+        by_inst.setdefault(ln.instrument, []).append(ln)
+    leaps = max((abs(b.pitch - a.pitch) for a, b in zip(notes, notes[1:])), default=0)
+
+    def moderate(iid):
+        return settings.character_for(insts[iid].section) == MODERATE
+
+    bass_notes = clip_notes(settings.bass, spans[-1].end) if settings.bass else []
+    rl = builtin_rules()
+
+    lows = [(b.start, b.end, b.pitch % 12) for b in bass_notes] + [(sp.start, sp.end, sp.label.bass) for sp in spans]
+
+    def clear(k: int) -> bool:
+        """The theme at this shift keeps the low-interval limits against the chord's bass and the bass file, at
+        any octave the bass voice can take (E1-G3)."""
+        for t in notes:
+            for b0, b1, pc in lows:
+                if b0 >= t.end or b1 <= t.start:
+                    continue
+                for q in range(pc + 24, 56, 12):
+                    d = t.pitch + k - q
+                    lim = rl.low_limit(d) if 0 < d < 12 else None
+                    if lim is not None and q < lim:
+                        return False
+        return True
+
+    lines: list[Line] = []
+    cells: dict[str, list[int | None]] = {}
+    figs: dict[str, list] = {}
+    drop: set[str] = set()
+    names = []
+    for group in THEME_GROUPS:
+        tag = "choir" if group[0].startswith("choir") else group[0]
+        if tag in left_out or not all(g in by_inst for g in group):
+            continue
+        if settings.keep is not None and insts[group[0]].section == "strings":
+            continue
+        shifts = {}
+        below = None
+        for iid in group:  # choir voices top down, each at most as high as the one above
+            k = _best_shift(notes, insts[iid], moderate(iid), below, 0 if tag == "choir" else THEME_FLOOR,
+                            None if tag == "choir" else clear)
+            if k is None or (tag == "choir" and leaps > 12):
+                shifts = {}
+                break
+            shifts[iid] = k
+            if tag == "choir":
+                below = k
+        if not shifts:
+            continue
+        for iid in group:
+            first = by_inst[iid][0]
+            ln = replace(first, role="melody", voices=())
+            lines.append(ln)
+            moved = [Note(n.pitch + shifts[iid], n.start, n.end, n.velocity) for n in notes]
+            cells[ln.id], figs[ln.id] = _figures_from(moved, spans)
+            drop |= {x.id for x in by_inst[iid]}
+        names.append(THEME_NAMES[tag])
+    if not lines:
+        if attempt == 0:
+            return None  # nothing can play it: voiced as usual (the reason line says so)
+        raise _NoMorePlans("no more theme plans")
+    # the leading tone or a 7th in a slash bass can't be doubled in an outer voice: the theme rests there
+    for i, sp in enumerate(spans):
+        sens = _sensitive_pcs(sp.label, key) & {sp.label.bass}
+        if sens and any(c[i] is not None and any((c[i] + d) % 12 in sens for _, _, d, _ in figs[lid][i] or ())
+                        for lid, c in cells.items()):
+            for lid in cells:
+                cells[lid][i] = None
+                figs[lid][i] = None
+    src = "melody" if settings.melody else "top voice"
+    text = f"theme ({src}) in octaves: " + ", ".join(names)
+    return {"lines": lines, "drop": drop, "cells": cells, "figures": figs, "text": text}
+
+
 def independent_bass(spans: list[ChordSpan], key: Key) -> list[Note]:
     """Moderate mode's independent bass (SPEC §5 step 2): the chord's bass note, moving by diatonic step toward
     the next chord's bass at the end of chords at least a half note long (at most two passing notes)."""
@@ -1773,9 +1952,21 @@ def _finish(approach, key, seed, spans, lines, cells, meta, settings: Settings, 
     rules = rules or builtin_rules()
     insts = insts or builtin_instruments()
     mode = settings.mode({insts[ln.instrument].section for ln in lines})
-    parts = _render(lines, spans, cells, meta["labels"], settings, meta.get("figures") or {}, key, rules, insts,
-                    mode)
-    report = check(parts, spans, key, mode, rules=rules, instruments=insts)
+    fixed = frozenset(meta.get("fixed") or ())
+    unmask: set[int] = set()
+    for _ in range(len(spans) + 1):
+        info: dict = {}
+        parts = _render(lines, spans, cells, meta["labels"], settings, meta.get("figures") or {}, key, rules, insts,
+                        mode, approach=approach, fixed=fixed, unmask=frozenset(unmask), info=info)
+        report = check(parts, spans, key, mode, rules=rules, instruments=insts)
+        if not info.get("masked"):
+            break
+        # a shape's rests broke a rule across chords (e.g. a choir leap after a rest): those chords play as set
+        bad = {x.chord for x in _must_fix(report, rules, set(fixed)) if x.chord is not None}
+        if not bad:
+            break
+        new = (bad | {c - 1 for c in bad if c > 0}) - unmask
+        unmask |= new or set(range(len(spans)))  # nothing new to try: every chord plays as set
     if reason is None:
         reason = _reason(APPROACH[approach], lines, cells, insts, settings, meta, spans, key)
     vel = settings.velocity
@@ -1810,105 +2001,290 @@ def _check_cached(parts: list[Part], spans: list[ChordSpan], key: Key, mode: str
 
 
 def _window(parts: list[Part], i: int, notes_at) -> list[Part]:
-    """Checker parts for chord i alone, with the given notes per part (empty parts left out)."""
+    """Checker parts for chord i alone, with the given notes per part (empty parts left out). A part that
+    doubles a left-out part doubles what that one doubles (shapes can rest a doubled line)."""
     out = []
+    got = {p.id: notes_at(p.id) for p in parts}
+    keep = {pid for pid, ns in got.items() if ns}
+    by_id = {p.id: p for p in parts}
+
+    def follow(d, at):
+        seen = set()
+        while d is not None and d not in keep and d not in seen:
+            seen.add(d)
+            q = by_id.get(d)
+            if q is None:
+                return None
+            d = q.doubles_at[at] if (at is not None and q.doubles_at is not None) else q.doubles
+        return d if d in keep else None
+
     for p in parts:
-        ns = notes_at(p.id)
-        if ns:
-            da = (p.doubles_at[i],) if p.doubles_at is not None else None
-            out.append(replace(p, notes=tuple(ns), doubles_at=da))
+        if p.id not in keep:
+            continue
+        ns = got[p.id]
+        da = (follow(p.doubles_at[i], i),) if p.doubles_at is not None else None
+        d = p.doubles if p.doubles is None or p.doubles in keep else follow(p.doubles, None)
+        q = replace(p, notes=tuple(ns), doubles_at=da)
+        if d != p.doubles:
+            q = replace(q, doubles=d)
+        out.append(q)
     return out
 
 
 def _render(lines: list[Line], spans: list[ChordSpan], cells, labels, settings: Settings,
-            figures: dict[str, list[Figure | None]], key: Key, rules: Rules, insts, mode: str) -> list[Part]:
+            figures: dict[str, list[Figure | None]], key: Key, rules: Rules, insts, mode: str,
+            approach: str = "A", fixed: frozenset = frozenset(), unmask: frozenset = frozenset(),
+            info: dict | None = None) -> list[Part]:
     """Checker parts with their real notes: rhythm patterns (SPEC §5c, §14), the melody and bass files' rhythm,
-    per-section velocity and re-strike every bar.
+    per-section velocity and re-strike every bar, and (v1.3) intensity shapes, phrase-end fills, anticipations,
+    pattern emphasis, a clear low register and accents on chord changes.
 
     Patterns are re-checked chord by chord against plain Sustain: where a pattern adds a rule problem at a
     chord (an error or a generator_must_pass warning that Sustain doesn't have there), that chord first loses
     its passing tones, then the parts named in the problem step down: a part in Hybrid or Scale steps plays its
     shape in chord tones, then it sustains; if no part is named, every patterned part steps down. A Hybrid or
-    Scale steps part whose scale notes clash a minor 2nd with the melody also plays chord tones at that chord.
+    Scale steps part whose scale notes clash a minor 2nd with the melody also plays chord tones at that chord,
+    and so does one within an octave of the melody (v1.3: steps near the melody sounded cluttered).
     Levels per part and chord: 3 pattern in its note mode + passing tones, 2 pattern in its note mode,
     1 pattern in chord tones, 0 Sustain.
+
+    Shapes (shapes.py) may rest lines at a chord (density, forces, sections): checked against the chord as set
+    and dropped at that chord if they add a problem; `unmask` lists chords that must play as set (_finish).
+    `fixed` lines (kept voicing, locks, melody, bass file, theme) are never changed by shapes or fills.
     """
     n = len(spans)
     tie = _ties(spans)
     sec = {ln.id: insts[ln.instrument].section for ln in lines}
     vel = {ln.id: settings.velocity_for(sec[ln.id]) for ln in lines}
+    info = info if info is not None else {}
+    end = max(sp.end for sp in spans)
+    nbars = -(-end // BAR)
+    secs_here = sorted({sec[ln.id] for ln in lines})
+    steps = {s: shp.bar_steps(settings.shape_for(s), nbars, settings.phrase) for s in secs_here}
+    shaped_on = any(not st.neutral for s in secs_here for st in steps[s])
+    fills = {s: settings.fill_for(s) for s in secs_here if settings.fill_for(s) != FILL_NONE}
+    emphasis = settings.pattern_emphasis
     want: dict[str, str] = {}
     for ln in lines:
         if ln.id in figures:
             continue  # the melody and bass-file lines keep the file's rhythm
         pt = settings.pattern_for(ln.id, sec[ln.id], ln.instrument)
         want[ln.id] = pt if pat.allowed(pt, sec[ln.id] == "choir") else pat.SUSTAIN
-    patterned = [lid for lid, pt in want.items() if pt != pat.SUSTAIN]
+    lib = pat.library()
+    free_lines = {lid for lid in want if lid not in fixed}
+    varying = shaped_on or settings.clear_low  # the pattern can change per chord or per bar
+
+    def pattern_at(lid: str, i: int, bar: int) -> str:
+        pt = want[lid]
+        if not varying or lid not in free_lines:
+            return pt
+        choir = sec[lid] == "choir"
+        st = steps[sec[lid]][min(bar, nbars - 1)]
+        if st.hit:
+            return HIT_PATTERN if pat.allowed(HIT_PATTERN, choir) else pat.SUSTAIN
+        if st.pattern:
+            pt = pat.step_down(pt, -st.pattern, choir)
+        if settings.clear_low and lib[pt].kind == "grid" and cells[lid][i] is not None and cells[lid][i] < CLEAR_LOW:
+            pt = pat.step_down(pt, 1, choir)
+        return pt
+
+    def pieces(lid: str, i: int) -> list[tuple[int, int, str]]:
+        sp = spans[i]
+        if not varying:
+            return [(sp.start, sp.end, want[lid])]
+        out: list[tuple[int, int, str]] = []
+        t = sp.start
+        while t < sp.end:
+            nxt = min(sp.end, (t // BAR + 1) * BAR)
+            pt = pattern_at(lid, i, t // BAR)
+            if out and out[-1][2] == pt:
+                out[-1] = (out[-1][0], nxt, pt)
+            else:
+                out.append((t, nxt, pt))
+            t = nxt
+        return out
+
+    piece_cache: dict = {}
+
+    def pieces_c(lid, i):
+        k = (lid, i)
+        if k not in piece_cache:
+            piece_cache[k] = pieces(lid, i)
+        return piece_cache[k]
+
+    patterned = [lid for lid in want if (want[lid] != pat.SUSTAIN if not varying else
+                                         any(pt != pat.SUSTAIN for i in range(n) if cells[lid][i] is not None
+                                             for _, _, pt in pieces_c(lid, i)))]
     uniform = len(set(vel.values())) <= 1 and (not vel or next(iter(vel.values())) == settings.velocity)
-    if not patterned and not figures and not settings.restrike_bars and uniform:
+    extras_on = shaped_on or fills or emphasis or settings.change_accents
+    if not patterned and not figures and not settings.restrike_bars and uniform and not extras_on:
         return build_parts(lines, spans, cells, labels, settings.velocity, insts, tie)  # exactly Milestone 4
     by_id = {ln.id: ln for ln in lines}
     scale = key.scale_pcs()
     moderate = {lid for lid in by_id if settings.character_for(sec[lid]) == MODERATE}
     level = {lid: [3] * n for lid in patterned}
-    lib = pat.library()
     nmode = {lid: settings.note_mode_for(sec[lid]) for lid in patterned}
     accent = {lid: settings.accent_for(lid, sec[lid]) for lid in patterned}
     # a part whose shape changes in chord tones (Hybrid/Scale steps on a pattern with a contour)
-    shaped = {lid for lid in patterned if nmode[lid] != pat.CHORD_TONES and not lib[want[lid]].flat}
+    shaped = {lid for lid in patterned if nmode[lid] != pat.CHORD_TONES
+              and any(not lib[pt].flat and lib[pt].note_mode is None
+                      for i in range(n) if cells[lid][i] is not None for _, _, pt in pieces_c(lid, i))}
     chord_pcs = [sp.label.pcs() for sp in spans]
     scales = [pat.chord_scale(chord_pcs[i] | {spans[i].label.bass}, key) for i in range(n)]
+    masked: dict[str, set[int]] = {}  # line id -> chords where a shape rests it
 
     def ok_pitch(lid):
         inst = insts[by_id[lid].instrument]
         return lambda q: inst.is_comfortable(q) or (lid in moderate and inst.is_playable(q))
-    oks = {lid: ok_pitch(lid) for lid in patterned}
+    oks = {lid: ok_pitch(lid) for lid in by_id}
 
-    def effective(lid, i) -> str:
+    # ---- velocity: section dynamics, shape steps, pattern emphasis, accents on chord changes
+    present = [s for s in shp.SECTION_ORDER if any(sec[lid] == s for lid in free_lines)] or list(shp.SECTION_ORDER)
+    any_pattern = bool(patterned)
+
+    def velocity(lid: str, tick: int, pt: str | None) -> int:
+        if not (shaped_on or emphasis):
+            return vel[lid]
+        k = DYNAMIC_STEPS.index(settings.dynamics_for(sec[lid]))
+        if shaped_on and lid not in fixed:
+            st = steps[sec[lid]][min(tick // BAR, nbars - 1)]
+            k += st.dynamics
+            if st.entering and st.sections is not None and present.index(sec[lid]) == min(st.sections,
+                                                                                            len(present)) - 1:
+                k += st.entering  # the section that just came in (Pulse bed)
+        if emphasis and pt is not None:
+            if pt != pat.SUSTAIN:
+                k += 1
+            elif any_pattern:
+                k -= 1
+        return DYNAMICS[DYNAMIC_STEPS[max(0, min(len(DYNAMIC_STEPS) - 1, k))]]
+
+    soft_factor = EMPHASIS_SOFT if emphasis else pat.ACCENT
+
+    def accented(v: int) -> int:
+        k = min(len(DYNAMIC_STEPS) - 1, next((j for j, s in enumerate(DYNAMIC_STEPS) if DYNAMICS[s] >= v),
+                                            len(DYNAMIC_STEPS) - 1) + 1)
+        return max(v, DYNAMICS[DYNAMIC_STEPS[k]])
+
+    def effective(lid, i, last: bool = False) -> str:
         if lid in figures:
             return "figure"
         if lid in level and level[lid][i] == 0:
             return pat.SUSTAIN
-        return want[lid]
+        ps = pieces_c(lid, i)
+        return ps[-1][2] if last else ps[0][2]
 
-    def chord_notes(lid: str, i: int) -> list[Note]:
+    # ---- anticipations (hits patterns with `anticipate`): the next chord an 8th early, tied over
+    antic: dict[str, set[int]] = {}
+    release: dict[int, set[str]] = {}  # chord -> parts that stop an 8th early under an anticipation
+    for lid in patterned:
+        for i in range(n - 1):
+            if cells[lid][i] is None or cells[lid][i + 1] is None or spans[i].end - spans[i].start < PPQ:
+                continue
+            if lib[pieces_c(lid, i)[-1][2]].anticipate and spans[i + 1].start == spans[i].end:
+                antic.setdefault(lid, set()).add(i)
+
+    def antic_active(i: int) -> bool:
+        """Some part really strikes the next chord early at the end of chord i."""
+        return any(i in a and level[x][i] > 0 and i not in masked.get(x, ()) and i + 1 not in masked.get(x, ())
+                   for x, a in antic.items())
+
+    def chord_notes(lid: str, i: int, plain: bool = False) -> list[Note]:
+        """plain: Sustain (or the file's figure), no shape rests: the reference the checks compare with."""
         p = cells[lid][i]
-        if p is None:
+        if p is None or (not plain and i in masked.get(lid, ())):
             return []
-        span, v = spans[i], vel[lid]
+        span = spans[i]
         if lid in figures:
+            v = velocity(lid, span.start, None)
             return figure_notes(p, figures[lid][i], span, v)
-        pt = effective(lid, i)
-        if pt == pat.SUSTAIN:
-            return [Note(p, span.start, span.end, v)]
-        spec = lib[pt]
-        mapper = None
-        if not spec.flat:
-            m = nmode[lid] if level[lid][i] >= 2 else pat.CHORD_TONES
-            mapper = pat.make_mapper(p, chord_pcs[i], scales[i], m, oks[lid], spec.min_step)
-        passing = None
-        if (level[lid][i] >= 3 and spec.passing and lid in moderate and sec[lid] != "choir"
-                and i + 1 < n and not tie[i]):
-            q = pat.passing_pitch(p, cells[lid][i + 1], scale)
-            passing = q if q is not None and oks[lid](q) else None
-        return pat.render(pt, p, span.start, span.end, v, passing=passing, mapper=mapper, grouping=accent[lid])
+        if plain or lid not in level or level[lid][i] == 0:
+            v = velocity(lid, span.start, pat.SUSTAIN)
+            out = [Note(p, span.start, span.end, v)]
+        else:
+            out = []
+            for s, e, pt in pieces_c(lid, i):
+                v = velocity(lid, s, pt)
+                if pt == pat.SUSTAIN:
+                    out.append(Note(p, s, e, v))
+                    continue
+                spec = lib[pt]
+                mapper = None
+                if not spec.flat:
+                    m = spec.note_mode or (nmode[lid] if level[lid][i] >= 2 else pat.CHORD_TONES)
+                    mapper = pat.make_mapper(p, chord_pcs[i], scales[i], m, oks[lid], spec.min_step, spec.degrees)
+                passing = None
+                if (level[lid][i] >= 3 and spec.passing and lid in moderate and sec[lid] != "choir"
+                        and i + 1 < n and not tie[i] and e == span.end):
+                    q = pat.passing_pitch(p, cells[lid][i + 1], scale)
+                    passing = q if q is not None and oks[lid](q) else None
+                out.extend(pat.render(pt, p, s, e, v, passing=passing, mapper=mapper, grouping=accent[lid],
+                                      soft_factor=soft_factor))
+            if i in antic.get(lid, ()) and i not in masked.get(lid, ()) and i + 1 not in masked.get(lid, ()):
+                t = span.end - pat.EIGHTH
+                out = [Note(x.pitch, x.start, min(x.end, t), x.velocity) for x in out if x.start < t]
+                out.append(Note(cells[lid][i + 1], t, span.end, accented(velocity(lid, t, pat.STABS))))
+        if not plain and lid in release.get(i, ()) and antic_active(i):
+            t = span.end - pat.EIGHTH
+            out = [Note(x.pitch, x.start, min(x.end, t), x.velocity) for x in out if x.start < t]
+        if settings.change_accents and out and out[0].start == span.start:
+            out[0] = Note(out[0].pitch, out[0].start, out[0].end, accented(out[0].velocity))
+        return out
 
     base = build_parts(lines, spans, cells, labels, settings.velocity, insts, tie)
+
+    def sustain_at(lid, i):
+        return chord_notes(lid, i, plain=True)
+
+    # ---- shapes: rest lines per chord (density, forces, sections), where that adds no problem
+    if shaped_on and any(st.changes_lines for s in secs_here for st in steps[s]):
+        ap = APPROACH[approach]
+        ens = settings.ensemble
+        lead = {lid: k for k, lid in enumerate(ap.lead)}
+        for i, span in enumerate(spans):
+            if i in unmask:
+                continue
+            bar = min(span.start // BAR, nbars - 1)
+            st = {s: steps[s][bar] for s in secs_here}
+            if not any(x.changes_lines for x in st.values()):
+                continue
+            cands = [by_id[lid] for lid in free_lines if cells[lid][i] is not None and by_id[lid].voices]
+            if not cands:
+                continue
+            ref = _check_cached(_window(base, i, lambda lid, i=i: sustain_at(lid, i)), [span], key, mode, rules,
+                                insts)
+            known = {x.message for x in ref.issues}
+            for tries in (("density", "forces", "sections"), ("density",)):
+                drop = _shape_rests(cands, st, tries, ens, ap, lead, insts)
+                if not drop:
+                    break
+                for lid in drop:
+                    masked.setdefault(lid, set()).add(i)
+                rep = _check_cached(_window(base, i, lambda lid, i=i: chord_notes(lid, i, plain=True)
+                                            if i not in masked.get(lid, ()) else []), [span], key, mode, rules, insts)
+                if not [x for x in _must_fix(rep, rules) if x.message not in known]:
+                    break
+                for lid in drop:
+                    masked[lid].discard(i)
+        info["masked"] = any(masked.values())
+
+    mel_ids = [lid for lid in by_id if by_id[lid].role == "melody" and lid in figures]
     if patterned:
         for i, span in enumerate(spans):
-            here = [lid for lid in patterned if cells[lid][i] is not None]
+            here = [lid for lid in patterned if cells[lid][i] is not None and i not in masked.get(lid, ())]
             if not here:
                 continue
+            # Hybrid / Scale steps within an octave of the melody: chord tones here (v1.3)
+            if mel_ids:
+                mel = [x.pitch for m in mel_ids for x in chord_notes(m, i)]
+                for lid in here:
+                    if lid in shaped and mel and any(abs(cells[lid][i] - q) <= 12 for q in mel):
+                        level[lid][i] = min(level[lid][i], 1)
 
-            def sustain_at(lid, i=i):
-                p = cells[lid][i]
-                if p is None:
-                    return []
-                if lid in figures:
-                    return figure_notes(p, figures[lid][i], spans[i], vel[lid])
-                return [Note(p, spans[i].start, spans[i].end, vel[lid])]
+            def masked_sustain(lid, i=i):
+                return [] if i in masked.get(lid, ()) else sustain_at(lid, i)
 
-            ref = _check_cached(_window(base, i, sustain_at), [span], key, mode, rules, insts)
+            ref = _check_cached(_window(base, i, masked_sustain), [span], key, mode, rules, insts)
             known = {x.message for x in ref.issues}
             while True:  # every round steps at least one part down, so this ends (at worst all Sustain)
                 rep = _check_cached(_window(base, i, lambda lid: chord_notes(lid, i)), [span], key, mode, rules, insts)
@@ -1917,6 +2293,19 @@ def _render(lines: list[Line], spans: list[ChordSpan], cells, labels, settings: 
                     # Hybrid / Scale steps notes a minor 2nd from the melody: those parts use chord tones here
                     clash = {pid for x in rep.by_check("melody_clash") if x.message not in known for pid in x.parts
                              if pid in shaped and level[pid][i] >= 2}
+                    # parts that would clash with an anticipation release an 8th early (or, against your own
+                    # fixed parts, the anticipation strikes on the beat)
+                    if not clash and i in {c for s in antic.values() for c in s}:
+                        rel = _antic_clash(i, [lid for lid in here if i in antic.get(lid, ()) and level[lid][i] > 0],
+                                           [lid for lid in by_id if cells[lid][i] is not None], chord_notes, spans,
+                                           fixed | set(figures))
+                        if rel is None:
+                            for lid in antic:
+                                antic[lid].discard(i)
+                            continue
+                        if rel - release.get(i, set()):
+                            release.setdefault(i, set()).update(rel)
+                            continue
                     if not clash:
                         break
                     for lid in clash:
@@ -1936,7 +2325,8 @@ def _render(lines: list[Line], spans: list[ChordSpan], cells, labels, settings: 
         for i in range(n - 1):
             here = [lid for lid in patterned if level[lid][i] == 3 and cells[lid][i] is not None]
             # only chords where a part really ends on a passing tone (otherwise both checks are the same)
-            if not here or not any(want[lid] in pat.PASSING_PATTERNS and lid in moderate for lid in here):
+            if not here or not any(effective(lid, i, last=True) in pat.PASSING_PATTERNS and lid in moderate
+                                   for lid in here):
                 continue
             two = [spans[i], spans[i + 1]]
 
@@ -1968,9 +2358,11 @@ def _render(lines: list[Line], spans: list[ChordSpan], cells, labels, settings: 
                 if lid in figures:
                     fig = figures[lid][i]
                     join = bool(fig) and fig[0][3]
+                elif (i - 1) in antic.get(lid, ()) and level.get(lid, [0] * n)[i - 1] > 0:
+                    join = True  # the anticipated note is tied over into the chord
                 else:
                     join = (tie[i - 1] and effective(lid, i) == pat.SUSTAIN
-                            and effective(lid, i - 1) == pat.SUSTAIN)
+                            and effective(lid, i - 1, last=True) == pat.SUSTAIN)
                 if join:
                     first = ns[0]
                     out[-1] = Note(first.pitch, out[-1].start, first.end, out[-1].velocity)
@@ -1979,7 +2371,188 @@ def _render(lines: list[Line], spans: list[ChordSpan], cells, labels, settings: 
         if settings.restrike_bars and lid not in figures:
             out = pat.split_at_bars(out)
         merged[lid] = out
-    return build_parts(lines, spans, cells, labels, settings.velocity, insts, tie, notes=merged)
+    free: dict[str, list[tuple[int, int]]] = {}
+    if shaped_on:
+        _shape_dropouts(merged, steps, sec, free_lines, nbars, spans)
+    if fills:
+        _fills(merged, fills, lines, spans, cells, labels, settings, sec, free_lines, masked, oks, key, free,
+               (rules, insts, mode))
+    return build_parts(lines, spans, cells, labels, settings.velocity, insts, tie, notes=merged, free=free)
+
+
+HIT_PATTERN = "hit_downbeat"
+CLEAR_LOW = 48  # "Clear low register": grid patterns on parts below C3 play one level simpler
+EMPHASIS_SOFT = 0.9  # Pattern emphasis: unaccented notes at 90% (not 80%)
+FILL_NAMES = {FILL_NONE: "None", FILL_RUN: "16th run", FILL_PICKUP: "Pickup (two 8ths)",
+              FILL_DROPOUT: "Drop-out (last beat)"}
+SHAPE_DROPOUT = PPQ // 2  # a shape's drop-out: the bar's last 8th
+FILL_DROPOUT_LEN = PPQ  # a fill drop-out: the phrase's last beat
+
+
+def _shape_rests(cands: list[Line], st: dict, what: tuple, ens: Ensemble, ap: Approach, lead: dict,
+                 insts) -> set[str]:
+    """Lines a shape step rests at one chord: Density (most important lines per voice kept, as the slider),
+    Forces (Divisi as Section: one divisi line per string instrument) and Sections (only the first n)."""
+    sec_of = {ln.id: insts[ln.instrument].section for ln in cands}
+    keep = {ln.id for ln in cands}
+    if "density" in what and any(st[s].density for s in set(sec_of.values())):
+        ks = {s: DENSITY_K[max(1, ens.density_for(s) + st[s].density)] for s in set(sec_of.values())}
+        keep = {ln.id for ln in _thin(cands, ap, insts, ks)}
+    if "forces" in what:
+        by_inst: dict[str, list[Line]] = {}
+        for ln in cands:
+            s = sec_of[ln.id]
+            if st[s].forces < 0 and ens.forces_for(s) == "divisi" and ln.forces == _DIV and ln.id in keep:
+                by_inst.setdefault(ln.instrument, []).append(ln)
+        for group in by_inst.values():
+            group.sort(key=lambda ln: lead.get(ln.id, 100))
+            keep -= {ln.id for ln in group[1:]}
+    if "sections" in what:
+        present = [s for s in shp.SECTION_ORDER if s in set(sec_of.values())]
+        for ln in cands:
+            s = sec_of[ln.id]
+            if st[s].sections is not None and present.index(s) >= st[s].sections:
+                keep.discard(ln.id)
+    return {ln.id for ln in cands} - keep
+
+
+def _antic_clash(i: int, group: list[str], sounding: list[str], chord_notes, spans, fixed) -> set[str] | None:
+    """The parts still holding chord i that clash (a semitone, a major 7th or a minor 9th) with the anticipated
+    notes: they release an 8th early. None when one of them is fixed (your melody or bass file, a locked part):
+    then there is no anticipation at this chord change."""
+    if not group:
+        return set()
+    t = spans[i].end - pat.EIGHTH
+    early = {q.pitch for lid in group for q in chord_notes(lid, i) if q.start == t}
+    out = set()
+    for lid in sounding:
+        if lid in group:
+            continue
+        if any(abs(a - q.pitch) in (1, 11, 13) for q in chord_notes(lid, i) if q.start <= t < q.end for a in early):
+            if lid in fixed:
+                return None
+            out.add(lid)
+    return out
+
+
+def _shape_dropouts(merged: dict, steps: dict, sec: dict, free_lines: set, nbars: int, spans):
+    """A shape step's drop-out: every part it can change rests on the bar's last 8th (a longer note is cut there
+    and struck again on the downbeat). Skipped where a chord starts inside that 8th."""
+    starts = {sp.start for sp in spans}
+    for lid in free_lines:
+        st = steps[sec[lid]]
+        for b in range(nbars):
+            if not st[b].dropout:
+                continue
+            a, z = (b + 1) * BAR - SHAPE_DROPOUT, (b + 1) * BAR
+            if any(a < x < z for x in starts) or a in starts:
+                continue
+            merged[lid] = _cut(merged[lid], a, z)
+
+
+def _fills(merged: dict, fills: dict, lines: list[Line], spans, cells, labels, settings: Settings, sec: dict,
+           free_lines: set, masked: dict, oks: dict, key: Key, free: dict, ctx):
+    """Phrase-end fills before every phrase (Phrase setting: 2, 4 or 8 bars) that another phrase follows.
+
+    Drop-out: the section rests on the phrase's last beat. 16th run / pickup: the section's top line (and its
+    octave doublings) runs 4 16ths / 2 8ths up or down the next chord's scale into its next note; a line whose
+    run leaves its range plays as before. Run notes are checked for range only (SPEC §14 "endpoints only"):
+    they stay in the target chord's scale and land on the next chord's note on the downbeat.
+    """
+    by_id = {ln.id: ln for ln in lines}
+    end = max(sp.end for sp in spans)
+    length = settings.phrase * BAR
+    t = length
+    while t < end:
+        j = next((k for k, sp in enumerate(spans) if sp.start == t), None)
+        t_ = t
+        t += length
+        if j is None or j == 0:
+            continue
+        i = j - 1
+        cut = t_ - FILL_DROPOUT_LEN
+        if spans[i].end - spans[i].start <= FILL_DROPOUT_LEN or spans[i].start >= cut:
+            continue
+        for s, kind in fills.items():
+            mine = [lid for lid in free_lines if sec[lid] == s and cells[lid][i] is not None
+                    and i not in masked.get(lid, ())]
+            if not mine:
+                continue
+            if kind == FILL_DROPOUT:
+                for lid in mine:
+                    merged[lid] = _cut(merged[lid], cut, t_)
+                continue
+            if s == "choir":
+                continue  # choirs don't run
+            runners = [lid for lid in mine if cells[lid][j] is not None and j not in masked.get(lid, ())]
+            if not runners:
+                continue
+            top = max(runners, key=lambda lid: cells[lid][i])
+            move = cells[top][j] - cells[top][i]
+            same = [lid for lid in runners if cells[lid][i] % 12 == cells[top][i] % 12
+                    and cells[lid][j] - cells[lid][i] == move]
+            # only lines above the rest of the section run, so the section's chord keeps no gap
+            rest = [cells[lid][i] for lid in mine if lid not in same]
+            runners = [lid for lid in same if not rest or cells[lid][i] > max(rest)]
+            scale = pat.chord_scale(spans[j].label.pcs() | {spans[j].label.bass}, key)
+            count, step = (4, pat.SIXTEENTH) if kind == FILL_RUN else (2, pat.EIGHTH)
+            runs = {}
+            for lid in runners:
+                target, prev = cells[lid][j], cells[lid][i]
+                d = -1 if target >= prev else 1  # come from below when the line rises (or holds)
+                ps = [pat.step_pitch(target, d * k, scale) for k in range(count, 0, -1)]
+                if any(q is None or not oks[lid](q) for q in ps):
+                    runs = {}
+                    break  # the top lines run together or not at all (no gap opens in the section)
+                runs[lid] = ps
+            new = {}
+            for lid, ps in runs.items():
+                v = max((x.velocity for x in merged[lid] if x.start < t_), default=settings.velocity)
+                notes = _cut(merged[lid], cut, t_)
+                notes += [Note(q, cut + k * step, cut + (k + 1) * step, v) for k, q in enumerate(ps)]
+                new[lid] = sorted(notes, key=lambda x: x.start)
+            # the checker leaves run notes out: the rest of the section must still be a clean chord there
+            if new and not _run_window_ok(merged, new, cut, t_, spans[i], lines, ctx, key):
+                continue
+            for lid, notes in new.items():
+                merged[lid] = notes
+                free.setdefault(lid, []).append((cut, t_))
+
+
+def _run_window_ok(merged: dict, new: dict, a: int, b: int, span: ChordSpan, lines: list[Line], ctx, key: Key) -> bool:
+    """No new problem from a run in [a, b): checked as the checker sees it (run notes left out)."""
+    rules, insts, mode = ctx
+    win = ChordSpan(a, b, span.label)
+
+    def parts(runners: dict):
+        out = []
+        for ln in lines:
+            if ln.id in runners:
+                continue  # free notes: not checked
+            ns = [Note(x.pitch, max(x.start, a), min(x.end, b), x.velocity) for x in merged[ln.id]
+                  if x.start < b and x.end > a]
+            if ns:
+                out.append(Part(ln.id, ln.instrument, tuple(ns), ln.role))
+        return out
+    before = {x.message for x in _must_fix(check(parts({}), [win], key, mode, rules=rules, instruments=insts,
+                                                 inside=False), rules)}
+    after = _must_fix(check(parts(new), [win], key, mode, rules=rules, instruments=insts, inside=False), rules)
+    return not [x for x in after if x.message not in before]
+
+
+def _cut(notes: list[Note], a: int, b: int) -> list[Note]:
+    """The notes with nothing sounding from a to b (notes starting there dropped, longer ones cut)."""
+    out = []
+    for x in notes:
+        if x.end <= a or x.start >= b:
+            out.append(x)
+        elif x.start < a:
+            out.append(Note(x.pitch, x.start, a, x.velocity))
+            if x.end > b:
+                out.append(Note(x.pitch, b, x.end, x.velocity))
+        elif x.end > b:
+            out.append(Note(x.pitch, b, x.end, x.velocity))
+    return out
 
 
 def rerender(orch: Orchestration, settings: Settings, rules=None, instruments=None) -> Orchestration:
@@ -1995,7 +2568,9 @@ def rerender(orch: Orchestration, settings: Settings, rules=None, instruments=No
 
 
 RENDER_ONLY = ("dynamics", "section_dynamics", "pattern", "section_patterns", "instrument_patterns", "part_patterns",
-               "restrike_bars", "note_mode", "section_note_modes", "accent", "section_accents", "part_variants")
+               "restrike_bars", "note_mode", "section_note_modes", "accent", "section_accents", "part_variants",
+               "shape", "section_shapes", "phrase", "fill", "section_fills", "pattern_emphasis", "clear_low",
+               "change_accents")
 
 
 def swap_leaps(orch: Orchestration, rules=None, instruments=None) -> list[Issue]:
@@ -2029,19 +2604,34 @@ def swap_leaps(orch: Orchestration, rules=None, instruments=None) -> list[Issue]
 
 def generate_all(chords, key, *, seed: int = 1, settings: Settings | None = None,
                  locks: dict[str, frozenset[str]] | None = None,
-                 previous: dict[str, Orchestration | None] | None = None, rules=None, instruments=None
-                 ) -> dict[str, Orchestration | GenerationError]:
-    """All three alternatives. Locked parts (per alternative) are kept from `previous`."""
-    out = {}
+                 previous: dict[str, Orchestration | None] | None = None, rules=None, instruments=None,
+                 parallel: bool = False) -> dict[str, Orchestration | GenerationError]:
+    """All three alternatives. Locked parts (per alternative) are kept from `previous`.
+
+    parallel=True builds them in worker processes (`parallel.py`); the result is the same, only faster. If the
+    pool can't be used it falls back to one process.
+    """
+    jobs = {}
     for a in APPROACHES:
         prev = (previous or {}).get(a)
         ids = (locks or {}).get(a, frozenset()) if prev is not None else frozenset()
-        try:
-            out[a] = generate(chords, key, seed=seed, approach=a, settings=settings, locked=prev,
-                              locked_ids=ids, rules=rules, instruments=instruments)
-        except GenerationError as exc:
-            out[a] = exc
-    return out
+        jobs[a] = dict(chords=chords, key=key, seed=seed, approach=a, settings=settings, locked=prev,
+                       locked_ids=ids, rules=rules, instruments=instruments)
+    if parallel:
+        from . import parallel as par
+        out = par.map_approaches(_generate_or_error, jobs)
+        if out is not None:
+            return out
+    return {a: _generate_or_error(**kw) for a, kw in jobs.items()}
+
+
+def _generate_or_error(**kw) -> Orchestration | GenerationError:
+    """One alternative, or the reason it couldn't be built (module level, so worker processes can run it)."""
+    chords, key = kw.pop("chords"), kw.pop("key")
+    try:
+        return generate(chords, key, **kw)
+    except GenerationError as exc:
+        return exc
 
 
 def with_dynamics(orch: Orchestration, dynamics: str, rules=None, instruments=None,
@@ -2107,6 +2697,8 @@ def _reason(ap: Approach, lines: list[Line], cells, insts, settings: Settings, m
     info = meta.get("info") or {}
     if info.get("melody"):
         bits.append(info["melody"])
+    if info.get("theme"):
+        bits.append(info["theme"][0].lower() + info["theme"][1:].rstrip("."))
     if info.get("bass") == "file":
         bits.append("bass line from your file in octaves")
     elif info.get("bass") == "independent":

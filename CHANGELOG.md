@@ -2,6 +2,65 @@
 
 All notable changes to OrchSketch. Versions follow the milestones in SPEC.md §10.
 
+## v1.3 — Textures and shapes (Phase 2, Milestone 8) — 2026-11-13
+
+### Fixed
+- **Speed guardrail** (SPEC §14, missed in v1.2: test 11 + melody/bass files took 5.0–5.2 s on Sam's PC).
+  A, B and C are now built in three worker processes (`parallel.py`), started in the background when the
+  app opens, so Generate takes about as long as the slowest alternative. The output is identical (tests
+  compare parallel and one-process results note for note); if the workers can't start, Generate falls back
+  to one process. The packaged app calls `multiprocessing.freeze_support()`, and `--self-check` now checks
+  the workers too.
+
+### Added
+- **Intensity shapes** (side panel *Shape*, per section, applies at once): Steady (default), Build, Swell,
+  Drop, Build and hit, 4-bar phrase, Breakdown, Pulse bed. Data files in `data/shapes/` (`shapes.py`): per bar,
+  Density and Dynamics steps down, Divisi played as Section, patterns a level simpler (16ths → 8ths →
+  half-time → Sustain), only the first n sections (strings, brass, woodwinds, choir), a downbeat hit, or a
+  drop-out on the bar's last 8th. Your settings are the peak, so shapes only rest or soften what the voicing
+  search placed: the harmony is never re-solved and shapes are render-only. Every chord a shape changes is
+  checked; where resting lines would break a rule (e.g. a choir leap after a rest), that chord plays as set.
+  The grid shows a rested cell as *(note)*.
+- **Phrase-end fills** (side panel *Fill*, per section; *Phrase* 2/4/8 bars): 16th run or pickup (two 8ths)
+  in the section's top line into the next phrase's first chord, or a drop-out on the phrase's last beat.
+  Runs go up or down the next chord's scale and land on its voiced note. SPEC §14 "endpoints only": run
+  notes are checked for range only (new `Part.free` spans in the checker); the rest of the section must
+  still pass at that beat, else that section doesn't run there.
+- **Arpeggios** (new family *arp*): up, down, up-down and rolling 16ths, up in 8ths, and root–5th–octave–10th
+  (8ths, chord degrees above the part's note). Always chord tones (`note_mode` in the pattern file).
+- **Hits**: syncopated stabs, stabs with anticipation (the next chord struck an 8th early and tied over;
+  parts still holding a clashing note release an 8th early, and against your own fixed parts it strikes on
+  the beat), and a downbeat hit (also for choirs).
+- **Theme in octaves** (top bar, a generation setting): your melody, or your clip's top note without a
+  melody file, played in octaves by horns, tenor trombones, cellos and choir soprano/alto/tenor (one line
+  per instrument), each in the octave that fits its range, instruments at C3 or above and clear of the
+  bass's low-interval limits; the choir bass sings the bass and everything else is voiced around it. A
+  group that can't play every note in one octave sits out; if none can, the melody is voiced as usual and
+  the reason line says so. The theme rests where it would double a leading tone or 7th in a slash bass.
+  Checker: choir voices singing one theme in unison/octaves are one line (no `choir_parallels`; Sam's call).
+- **Ear-test fixes** (v1.2 feedback), all options, off by default:
+  - *Pattern emphasis*: patterned parts a dynamic step louder (unaccented notes at 90%), sustained parts
+    under them a step softer. CC1 stays the section's level.
+  - *Clear low register*: 8th/16th patterns on notes below C3 play one level simpler.
+  - *Accent chord changes* (research item [25]): every part's first note at a chord change a step louder.
+  - Not an option: a Hybrid/Scale steps part within an octave of the melody plays chord tones at that chord
+    (v1.2's "chaotic under a melody"). This changes v1.2's output only for Hybrid/Scale steps with a melody.
+- **Milestone 8 ear-test set** (`tests/data/phase2b_ear_tests.json`, 11 cases, one score each on the named
+  harmony tab): `scripts\benchmark.bat` builds them in `Projects\Benchmark\Phase2b\` after the Phase 2 set.
+- Ear test (Sam, `tests/ratings.csv` T1–T11): mean 4.5, all 4–5 after one round of shape tuning (Breakdown
+  keeps two sections at Density −2, a step softer; the Build-and-hit hit is a half note a step softer; each
+  Pulse bed section enters a step softer). Speed on Sam's PC: test 11 + files 2.5–2.7 s (v1.2: 5.0–5.2 s);
+  `benchmark.bat` 50/50 runs pass.
+- Tests: `tests/test_textures.py` (data files, arpeggios, anticipations, shapes, fills, theme, the options,
+  the window and projects, a `slow` sweep of every shape × pattern family × fill on all 12 files and A/B/C,
+  and a `slow` speed check); `tests/test_generator.py` checks parallel = one process.
+
+### Changed
+- Settings, projects and the undo history carry the new fields (old projects open with the defaults).
+  Every new option at its default gives exactly v1.2's notes (A, v0.4 and v1.1 pattern snapshots).
+- `tests/test_pattern_engine.py` sweeps Milestone 7's patterns (`pat.V13_PATTERNS` are swept in
+  `test_textures.py`).
+
 ## v1.2 — Pattern engine (Phase 2, Milestone 7) — 2026-11-13
 
 ### Added

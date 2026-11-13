@@ -1,0 +1,16 @@
+{
+  "id": "stabs_push",
+  "name": "Stabs with anticipation",
+  "short": "push",
+  "order": 34,
+  "family": "pulse",
+  "kind": "hits",
+  "hits": [
+    0,
+    6,
+    10
+  ],
+  "length": 2,
+  "anticipate": true,
+  "description": "Stabs on 1, the 'and' of 2 and the 'and' of 3; the next chord is struck an 8th early and tied over."
+}

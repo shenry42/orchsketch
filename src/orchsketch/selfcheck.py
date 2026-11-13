@@ -57,11 +57,15 @@ def run(audio: bool = True, log: Path | None = LOG, synth: bool = True) -> tuple
         labels = [ChordLabel(9, "min", 9), ChordLabel(5, "maj", 5), ChordLabel(0, "maj", 0), ChordLabel(7, "maj", 7)]
         chords = [ChordSpan(i * BAR, (i + 1) * BAR, lab) for i, lab in enumerate(labels)]
         alts = generate_all(chords, Key("A", "minor"), seed=1)
+        from . import parallel
+        par = generate_all(chords, Key("A", "minor"), seed=1, parallel=True)
+        assert parallel.pool() is not None, "the A/B/C worker processes couldn't start"
+        assert par == alts, "A/B/C built in worker processes differ from one process"
         for a, o in alts.items():
             assert not isinstance(o, Exception), f"{a}: {o}"
             assert not [i for i in o.report.issues if i.severity == ERROR], f"{a}: checker errors"
         state["alts"] = alts
-        return ", ".join(f"{a} {len(o.sounding_lines)} parts" for a, o in alts.items())
+        return ", ".join(f"{a} {len(o.sounding_lines)} parts" for a, o in alts.items()) + ", worker processes OK"
 
     def export():
         from .export import BOTH, export_all
