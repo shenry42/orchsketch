@@ -202,6 +202,24 @@ def describe(orch: Orchestration, insts=None) -> str:
         extra.append(f"{st.phrase}-bar phrases")
     extra += [t for on, t in ((st.pattern_emphasis, "pattern emphasis"), (st.clear_low, "clear low register"),
                               (st.change_accents, "accented chord changes")) if on]
+    # v1.4: expression
+    from . import expression as ex
+    sw = {sec: st.swell_for(sec) for sec in secs}
+    if set(sw.values()) - {ex.SWELL_OFF}:
+        extra.append("swells " + ", ".join(f"{sec} {ex.SWELL_NAMES[v].lower()}" for sec, v in sw.items()
+                                           if v != ex.SWELL_OFF) if len(set(sw.values())) > 1
+                     else "swells " + ex.SWELL_NAMES[next(iter(sw.values()))].lower())
+    ex_meta = orch.meta.get("expression") or {}
+    extra += [t for on, t in ((st.curves, "CC curves"), (st.phrase_arcs, "phrase arcs"),
+                              (st.beat_accents, "beat accents"), (st.balance, "balanced sections"),
+                              (st.long_doubling, "long notes only in the high doubling"),
+                              (st.humanize != ex.HUMANIZE_OFF, f"humanize {st.humanize}"),
+                              (bool(ex_meta.get("trem")), "tremolo part")) if on]
+    if st.riser:
+        rise = ex_meta.get("rise") or {}
+        layers = max((v[3] for v in rise.values()), default=0)
+        extra.append((f"{st.riser}-bar {'Shepard ' if layers > 1 else ''}riser in the {st.riser_section}") if rise
+                     else "no riser (it didn't fit)")
     if extra:
         out = (out + "; " if out else "") + ", ".join(extra)
     return out

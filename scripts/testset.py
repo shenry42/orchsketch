@@ -12,7 +12,8 @@ Then (v1.2) the Phase 2 ear-test set (SPEC §14, tests\data\phase2_ear_tests.jso
 v1.1 baseline and three pattern-engine setups, plus pattern alternatives 2 and 3 on two of them, saved to
 Documents\OrchSketch\Projects\Benchmark\Phase2\ and added to the same report, with generation times.
 Then (v1.3) the Milestone 8 ear-test set (tests\data\phase2b_ear_tests.json): one project per case in
-Documents\OrchSketch\Projects\Benchmark\Phase2b\, opening on the harmony tab to rate.
+Documents\OrchSketch\Projects\Benchmark\Phase2b\, opening on the harmony tab to rate; and (v1.4) the
+Milestone 9 set (tests\data\phase2c_ear_tests.json) in Documents\OrchSketch\Projects\Benchmark\Phase2c\.
 A chord expected as "unrecognized" must come out unrecognized and is then typed in by hand, as you would
 (its "correct_to" symbol), before Confirm all.
 
@@ -44,6 +45,8 @@ PHASE2 = BENCHMARK / "Phase2"
 PHASE2_SET = DATA / "phase2_ear_tests.json"
 PHASE2B = BENCHMARK / "Phase2b"
 PHASE2B_SET = DATA / "phase2b_ear_tests.json"  # Milestone 8 (v1.3)
+PHASE2C = BENCHMARK / "Phase2c"
+PHASE2C_SET = DATA / "phase2c_ear_tests.json"  # Milestone 9 (v1.4)
 _APP = None  # the off-screen QApplication
 
 
@@ -93,9 +96,18 @@ def _configure(setup: dict):
             w.phrase_box.setCurrentIndex(w.phrase_box.findData(opts["phrase"]))
             w.phrase_box.activated.emit(w.phrase_box.currentIndex())
         for key, box in (("emphasis", "emphasis_box"), ("clear_low", "clear_low_box"),
-                         ("change_accents", "change_accent_box"), ("theme", "theme_box")):
+                         ("change_accents", "change_accent_box"), ("theme", "theme_box"),
+                         ("curves", "curves_box"), ("phrase_arcs", "arcs_box"), ("beat_accents", "beats_box"),
+                         ("balance", "balance_box"), ("long_doubling", "long_dbl_box"), ("shepard", "shepard_box")):
             if key in opts:
                 getattr(w, box).setChecked(bool(opts[key]))
+        if "swell" in opts:  # every section
+            w._slider_moved("swell", opts["swell"])
+        for key, box in (("humanize", "humanize_box"), ("riser", "riser_box"), ("riser_section", "riser_section_box")):
+            if key in opts:
+                b = getattr(w, box)
+                b.setCurrentIndex(b.findData(opts[key]))
+                b.activated.emit(b.currentIndex())
     return go
 
 
@@ -246,11 +258,12 @@ def phase2(only: list[str] | None = None, folder: Path = PHASE2) -> tuple[int, i
     return passed, total, out
 
 
-def phase2b(only: list[str] | None = None, folder: Path = PHASE2B) -> tuple[int, int, list[str]]:
-    """Milestone 8 (v1.3) ear-test projects: one per case, one score each on the named harmony tab."""
+def phase2b(only: list[str] | None = None, folder: Path = PHASE2B, data: Path = PHASE2B_SET,
+            title: str = "Milestone 8") -> tuple[int, int, list[str]]:
+    """Milestone 8 (v1.3) and 9 (v1.4) ear-test projects: one per case, one score each on the named harmony tab."""
     folder.mkdir(parents=True, exist_ok=True)
-    doc = json.loads(PHASE2B_SET.read_text(encoding="utf-8"))
-    out = ["Milestone 8 ear-test set (tests\\data\\phase2b_ear_tests.json). Projects: " + str(folder),
+    doc = json.loads(data.read_text(encoding="utf-8"))
+    out = [f"{title} ear-test set (tests\\data\\{data.name}). Projects: " + str(folder),
            "Each project opens on the harmony tab to rate; give it one score from 1 to 5.", ""]
     passed = total = 0
     for case in doc["cases"]:
@@ -299,6 +312,10 @@ def main(only: list[str] | None = None, folder: Path = TESTSET, report: Path | N
         out += lines
         passed += p3
         total += t3
+        p4, t4, lines = phase2b(folder=PHASE2C, data=PHASE2C_SET, title="Milestone 9 (v1.4)")
+        out += lines
+        passed += p4
+        total += t4
     out.append(f"AUTOMATIC CHECKS: {passed}/{total} runs pass" + ("  -> OK" if passed == total else "  -> FAIL"))
     out.append("Next: the ear test. Open each project in the app and score A, B and C from 1 to 5"
                + (" (Phase2: the shown alternative)." if with_phase2 else "."))

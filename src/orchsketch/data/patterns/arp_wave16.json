@@ -1,0 +1,27 @@
+{
+  "id": "arp_wave16",
+  "name": "Root-5th-octave-10th wave (16ths)",
+  "short": "wave16",
+  "order": 47,
+  "family": "arp_wave",
+  "kind": "grid",
+  "step": "16th",
+  "accents": [
+    0,
+    6,
+    12
+  ],
+  "contour": [
+    0,
+    5,
+    8,
+    10,
+    8,
+    5
+  ],
+  "degrees": true,
+  "note_mode": "chord",
+  "end_on_anchor": true,
+  "down": "arp_wave",
+  "description": "The root-5th-octave-10th wave in 16ths, accented in groups of 6+6+4 (v1.4)."
+}

@@ -2,6 +2,74 @@
 
 All notable changes to OrchSketch. Versions follow the milestones in SPEC.md §10.
 
+## v1.4 — Expression (Phase 2, Milestone 9) — 2026-11-13
+
+### Added
+- **CC1/CC11 curves** (side panel *Expression → CC1/CC11 curves*, applies at once; `expression.py`). Each
+  part's CC1 follows its level bar by bar: the section's Dynamics plus the intensity shape's step (the same
+  steps that set velocity), ramping in over the last beat before a louder bar (over the whole bar while it
+  keeps rising, as in Build). Strings and choir get a crescendo/diminuendo over every phrase on CC1; woodwinds
+  and brass one CC11 arc per phrase (100 at the ends, 127 in the middle; SPEC §14); held chords of a half
+  note or longer swell a little. Curves are stored in the orchestration (`meta["expression"]["curves"]`), so
+  projects reopen with exactly the same curves. Export writes them instead of the constant CC1 (at most one
+  event per 16th, only where the value changes). The audition plays each channel's curve as CC11 (General
+  MIDI uses CC1 for vibrato), relative to the part's loudest point.
+- **Swells** (*Expression → Swell*, per section): CC1 dips and swells into every chord change, or only into
+  the downbeat of each new phrase, over the chord's last beat (its last half on longer chords, at most a
+  bar). Turns curves on for that section.
+- **Tremolo part**: a *Tremolo (strings)* pattern. It plays like Sustain (re-struck at each chord), so the
+  rules and the checker see exactly Sustain, and its notes export as their own part (`{Part}-trem`,
+  "Violins I trem") for a tremolo patch. Strings only (other sections sustain); GM Tremolo Strings in the
+  audition.
+- **Risers** (*Expression → Riser*: off / 1 / 2 / 4 bars, strings or woodwinds, *Shepard*): a line climbing by
+  scale steps into the shape's hit (Build and hit), else into the last chord, landing on the line's own chord
+  tone on the beat, with a velocity and CC1 crescendo. Plain: the section's top line (Violins I / flute),
+  doubled by the next instrument (Violins II / clarinet). Shepard: three layers (violins I, II, violas /
+  flute, clarinet, bassoon), the top fading out and the bottom fading in on CC11. Riser notes export as their
+  own part (`{Part}-rise`) and are checked like runs (SPEC §14 endpoints rule: range, every note in its
+  chord's scale, the last beat in the target chord's scale); the rest of the texture must stay clean without
+  them, else only the top layer plays, else no riser (the reason line says so).
+- **Velocity shaping**: *Phrase arcs* (velocity ×0.88 at the phrase ends to ×1.12 in the middle) and *Beat
+  accents* (beat 1 ×1.15, beat 3 ×1.06, beats 2/4 ×0.92, off-beats ×0.86). Velocities only.
+- **Humanize** (Off / Light / Medium: ±6 ticks and ±4 velocity, ±12 and ±7 at 480 PPQ): seeded per seed,
+  alternative and part, applied only in the export and the audition. The grid, the checker and the saved
+  notes stay on the grid; no note starts before bar 1 or overlaps the next on its pitch.
+- **Ear-test follow-ups (v1.3)**:
+  - *Balance sections* (option): `data/balance.json`, woodwinds a dynamic step under the other sections
+    (velocity and CC1) — the Pulse bed (T7) note.
+  - *High doubling: long notes only* (option): a melody doubling at C6 (Ableton C5) or above doubles only
+    notes of a quarter or longer — the T5 piccolo note.
+  - Two new arpeggios in their own family (*arp_wave*): root–5th–octave–10th up and back down in 8ths
+    (3+3+2 accents, the six-note wave runs across the bar line) and in 16ths — the "generic" T9 note.
+- **Milestone 9 ear-test set** (`tests/data/phase2c_ear_tests.json`, 7 cases, one score each on harmony B):
+  `scripts\benchmark.bat` builds them in `Projects\Benchmark\Phase2c\`.
+- Tests: `tests/test_expression.py` (export bytes of v1.3 with the defaults, curves, swells, tremolo, risers,
+  Shepard, velocity shaping, balance, the doubling rule, humanize, a sweep of five expression setups on all 12
+  files × A/B/C, speed, the window, undo and projects); `tests/data/v13_export_snapshot.json` (345 exported
+  files of v1.3, made with `tests/make_v13_export_snapshot.py`).
+
+- **Piano roll expression lane**: velocity bars per note, the CC1 curve (orange; the constant CC1 when curves
+  are off) and CC11 (dashed green); louder notes brighter, tremolo notes purple, riser notes orange.
+- Ear test (Sam, `tests/ratings.csv` X1–X7): first round mean 3.7; after one tuning round X2 4, X4 5, X6 4,
+  X7 5, final mean 4.3. Ableton check: CC1 curves arrive as clip envelopes: pass. `benchmark.bat` 57/57 runs
+  pass; test 11 + files 3.3–3.6 s on Sam's PC (under the ~4 s limit; see STATUS for the variance).
+
+### Changed
+- **Tuning after the first ear test**: new projects start with *Balance sections* and *High doubling: long
+  notes only* on (the generator's defaults stay off; projects from v1.3 open with both off); a section a shape
+  takes out next bar fades a step (velocity) and down on CC1 in its last bar; beat accents and phrase arcs
+  about twice as strong; with Pattern emphasis a part given its own pattern plays a step up; tremolo strings
+  louder in the audition (channel volume; the export is unchanged).
+- `test_sixteen_bars_with_every_pattern_alternative_is_quick`: limit 0.9× the harmony time (was 0.6×; it
+  failed once on a busy PC, v1.3 and v1.4 time the same on that path).
+- **Breakdown** shape (data only): the break is Density −1 instead of −2 and keeps divisi (T6 "still thin").
+  Projects saved with v1.3 keep their notes; regenerating one with Breakdown sounds fuller.
+- Export: a part with tremolo or riser notes writes up to three files; the drag handle of a row drags them
+  all. Combined divisi files hold the lines' own notes (tremolo and riser parts have their own files).
+- Settings, projects and the undo history carry the new fields (old projects open with everything off).
+  With every new option at its default the notes are v1.3's (A, v0.4 and v1.1 pattern snapshots, all sweeps)
+  and the exported files are v1.3's byte for byte.
+
 ## v1.3 — Textures and shapes (Phase 2, Milestone 8) — 2026-11-13
 
 ### Fixed

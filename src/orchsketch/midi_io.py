@@ -192,6 +192,23 @@ def read_monophonic_file(path, label: str = "Melody") -> Clip:
 
 
 # ---------------------------------------------------------------- writing
+def note_events(notes, channel: int = 0, controls=None) -> list:
+    """(tick, order, message) for notes and controller events, sorted: note-offs, then controllers, then
+    note-ons at the same tick."""
+    events = []
+    for n in notes:
+        events.append((n.start, 2 if controls else 1,
+                       mido.Message("note_on", note=n.pitch, velocity=n.velocity, channel=channel)))
+        events.append((n.end, 0, mido.Message("note_off", note=n.pitch, velocity=0, channel=channel)))
+    if controls:
+        for t, cc, v in controls:
+            events.append((t, 1, mido.Message("control_change", control=cc, value=v, channel=channel)))
+        events.sort(key=lambda e: (e[0], e[1], getattr(e[2], "note", 0), getattr(e[2], "control", 0)))
+    else:
+        events.sort(key=lambda e: (e[0], e[1], e[2].note))  # offs before ons at the same tick
+    return events
+
+
 def write_notes(
     path,
     notes: list[Note],
@@ -201,8 +218,10 @@ def write_notes(
     program: int | None = None,
     cc1: int | None = None,
     channel: int = 0,
+    controls=None,
 ) -> Path:
-    """Write one track as a type-0 MIDI file at PPQ 480, starting at bar 1."""
+    """Write one track as a type-0 MIDI file at PPQ 480, starting at bar 1. controls (v1.4): (tick, controller,
+    value) events, e.g. CC1/CC11 curves, sent before the notes at the same tick."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     mid = mido.MidiFile(type=0, ticks_per_beat=PPQ)
@@ -215,11 +234,7 @@ def write_notes(
         track.append(mido.Message("program_change", program=program, channel=channel, time=0))
     if cc1 is not None:
         track.append(mido.Message("control_change", control=1, value=cc1, channel=channel, time=0))
-    events = []
-    for n in notes:
-        events.append((n.start, 1, mido.Message("note_on", note=n.pitch, velocity=n.velocity, channel=channel)))
-        events.append((n.end, 0, mido.Message("note_off", note=n.pitch, velocity=0, channel=channel)))
-    events.sort(key=lambda e: (e[0], e[1], e[2].note))  # offs before ons at the same tick
+    events = note_events(notes, channel, controls)
     now = 0
     for tick, _, msg in events:
         track.append(msg.copy(time=tick - now))

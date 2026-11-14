@@ -32,10 +32,11 @@ from ..analysis import AnalysisSession, ChordLabel, SymbolError, parse_symbol
 from ..checker import chords_from_session
 from ..edits import bar_chords, regenerate, regenerate_chord, regenerate_part, swap
 from .. import project as pj
-from ..export import BOTH, EXPORT_CHOICES, EXPORT_ROOT, FULL, PARTS, export_all, export_folder, export_part, safe_name
+from ..export import BOTH, EXPORT_CHOICES, EXPORT_ROOT, FULL, PARTS, export_all, export_folder, export_part_files, safe_name
 from .. import patterns as pat
 from .. import pattern_alts as pa
 from .. import shapes as shp
+from .. import expression as ex
 from ..generator import (
     APPROACH, APPROACHES, CHARACTERS, DENSITY_STEPS, DOUBLINGS, DYNAMIC_STEPS, FILL_NAMES, FILL_NONE, FILLS, FORCES,
     MELODY_HOSTS, TOP_INPUT, TOP_SMOOTH, Ensemble, GenerationError, Orchestration, Settings, generate_all, rerender,
@@ -59,7 +60,7 @@ DOUBLING_NAMES = {"auto": "Doubling: auto", "off": "Doubling: off", "up": "Doubl
 CUSTOM = "custom"
 ALL = "all"
 SLIDERS = ("character", "forces", "density", "dynamics")
-RENDER_KEYS = ("dynamics", "pattern", "note_mode", "accent", "shape", "fill")  # apply at once, without regenerating
+RENDER_KEYS = ("dynamics", "pattern", "note_mode", "accent", "shape", "fill", "swell")  # apply at once, without regenerating
 NO_PALTS = ((None, None, None),) * 3  # pattern alternatives per harmony tab: (None = pattern 1, 2, 3)
 EXPORT_NAMES = {PARTS: "Per-part files", FULL: "Full score file", BOTH: "Parts + full score"}
 SAVE, DISCARD, CANCEL = "save", "discard", "cancel"
@@ -68,8 +69,17 @@ SAVE, DISCARD, CANCEL = "save", "discard", "cancel"
 def default_values() -> dict:
     return {sec: {"character": "safe", "forces": "section", "density": 5, "dynamics": "mf",
                   "pattern": pat.SUSTAIN, "note_mode": pat.CHORD_TONES, "accent": pat.PATTERN_ACCENTS,
-                  "shape": shp.STEADY, "fill": FILL_NONE}
+                  "shape": shp.STEADY, "fill": FILL_NONE, "swell": ex.SWELL_OFF}
             for sec in SECTIONS}
+
+
+# v1.4: window-wide expression options (Settings fields of the same name). EXPRESSION_OFF is v1.3 (the generator's
+# defaults, and what a project saved before v1.4 opens with); a new project starts with EXPRESSION_DEFAULTS:
+# Balance sections and long notes only in a high doubling on (Sam's ear tests T5/T7/X2/X3/X4).
+EXPRESSION_OFF = {"curves": False, "phrase_arcs": False, "beat_accents": False, "balance": False,
+                  "humanize": ex.HUMANIZE_OFF, "riser": 0, "riser_section": "strings", "shepard": False,
+                  "long_doubling": False}
+EXPRESSION_DEFAULTS = dict(EXPRESSION_OFF, balance=True, long_doubling=True)
 
 
 def freeze(d: dict) -> tuple:
@@ -141,6 +151,7 @@ class EditState:
     clear_low: bool = False  # v1.3: clear low register
     change_accents: bool = False  # v1.3: accent chord changes
     theme: bool = False  # v1.3: unison/octave theme (a generation setting)
+    expression: tuple = ()  # v1.4: every expression option, (key, value) pairs; () = a v1.3 project (all off)
     extra: dict = field(default_factory=dict, compare=False, hash=False)
 
 
@@ -575,6 +586,7 @@ class MainWindow(QMainWindow):
         ew = QWidget()
         ew.setLayout(ebox)
         form.addRow("Rhythm", ew)
+        self._build_expression(form)
         self.phrase_box.activated.connect(lambda _: self._extra_toggled(f"Phrase {self.phrase_box.currentData()} bars",
                                                                         True))
         self.shape_box.activated.connect(lambda _: self._slider_moved("shape", self.shape_box.currentData()))
@@ -697,6 +709,98 @@ class MainWindow(QMainWindow):
     def approach(self) -> str:
         return APPROACHES[self.tab]
 
+    def _build_expression(self, form):
+        """v1.4 Expression: Swell per section (the Set box), the rest for all sections. All apply at once."""
+        head = QLabel("Expression")
+        head.setStyleSheet("font-weight: bold; padding-top: 6px;")
+        form.addRow(head)
+        self.swell_box = QComboBox()
+        for sw in ex.SWELLS:
+            self.swell_box.addItem(ex.SWELL_NAMES[sw], sw)
+        self.swell_box.setToolTip("CC1 dips and swells into every chord change, or only into the downbeat of each "
+                                  "new phrase (turns CC curves on for these sections). Applies at once.")
+        self.swell_box.activated.connect(lambda _: self._slider_moved("swell", self.swell_box.currentData()))
+        form.addRow("Swell", self.swell_box)
+        self.curves_box = QCheckBox("CC1/CC11 curves")
+        self.curves_box.setToolTip("Export CC1 (dynamics) and CC11 (expression) curves per part instead of one "
+                                   "CC1 value: they follow the shape, swell a little in held chords, and arc over "
+                                   "each phrase (CC11 for winds and brass). The audition plays them as expression.")
+        self.arcs_box = QCheckBox("Phrase arcs (velocity)")
+        self.arcs_box.setToolTip("Velocities rise toward the middle of every phrase and fall back.")
+        self.beats_box = QCheckBox("Beat accents (velocity)")
+        self.beats_box.setToolTip("Beat 1 strongest, then beat 3; beats 2 and 4 and the off-beats a little softer.")
+        self.balance_box = QCheckBox("Balance sections")
+        self.balance_box.setToolTip("Woodwinds a dynamic step under the other sections at the same Dynamics "
+                                    "(velocity and CC1), so they don't cover the strings.")
+        self.long_dbl_box = QCheckBox("High doubling: long notes only")
+        self.long_dbl_box.setToolTip("A melody doubling at C6 (Ableton C5) or above doubles only notes of a quarter "
+                                     "or longer, so quick notes don't chatter in the piccolo or flute.")
+        self.balance_box.setChecked(EXPRESSION_DEFAULTS["balance"])
+        self.long_dbl_box.setChecked(EXPRESSION_DEFAULTS["long_doubling"])
+        xbox = QVBoxLayout()
+        for key, w in (("curves", self.curves_box), ("phrase_arcs", self.arcs_box), ("beat_accents", self.beats_box),
+                       ("balance", self.balance_box), ("long_doubling", self.long_dbl_box)):
+            xbox.addWidget(w)
+            w.toggled.connect(lambda on, w=w: self._extra_toggled(w.text(), on))
+        xw = QWidget()
+        xw.setLayout(xbox)
+        form.addRow("", xw)
+        self.humanize_box = QComboBox()
+        for h in ex.HUMANIZE:
+            self.humanize_box.addItem(ex.HUMANIZE_NAMES[h], h)
+        self.humanize_box.setToolTip("Seeded timing and velocity offsets in the export and the audition (the grid "
+                                     "stays on the grid; the same offsets every time).")
+        form.addRow("Humanize", self.humanize_box)
+        self.riser_box = QComboBox()
+        for b in ex.RISER_BARS:
+            self.riser_box.addItem("Off" if not b else f"{b} bar" + ("s" if b > 1 else ""), b)
+        self.riser_section_box = QComboBox()
+        for sec in ex.RISER_SECTIONS:
+            self.riser_section_box.addItem(sec.capitalize(), sec)
+        self.shepard_box = QCheckBox("Shepard")
+        self.shepard_box.setToolTip("Three layers rising together, the top fading out and the bottom fading in "
+                                    "(CC11), each exported as its own riser part.")
+        self.riser_box.setToolTip("A line rising by scale steps into the shape's hit (Build and hit), else into the "
+                                  "last chord, landing on a chord tone. Exported as its own part (e.g. Vln1-rise).")
+        rrow = QHBoxLayout()
+        for w in (self.riser_box, self.riser_section_box, self.shepard_box):
+            rrow.addWidget(w)
+        rw = QWidget()
+        rw.setLayout(rrow)
+        form.addRow("Riser", rw)
+        self.shepard_box.toggled.connect(lambda on: self._extra_toggled("Shepard riser", on))
+        self.humanize_box.activated.connect(
+            lambda _: self._extra_toggled(f"Humanize {self.humanize_box.currentText()}", True))
+        self.riser_box.activated.connect(lambda _: self._extra_toggled(f"Riser {self.riser_box.currentText()}", True))
+        self.riser_section_box.activated.connect(
+            lambda _: self._extra_toggled(f"Riser in the {self.riser_section_box.currentData()}", True))
+
+    def expression_values(self) -> dict:
+        """The window-wide expression options (Settings fields)."""
+        return {"curves": self.curves_box.isChecked(), "phrase_arcs": self.arcs_box.isChecked(),
+                "beat_accents": self.beats_box.isChecked(), "balance": self.balance_box.isChecked(),
+                "humanize": self.humanize_box.currentData() or ex.HUMANIZE_OFF,
+                "riser": self.riser_box.currentData() or 0,
+                "riser_section": self.riser_section_box.currentData() or "strings",
+                "shepard": self.shepard_box.isChecked(), "long_doubling": self.long_dbl_box.isChecked()}
+
+    def _expression_state(self) -> tuple:
+        return tuple(sorted(self.expression_values().items()))
+
+    def _show_expression(self, pairs: tuple):
+        vals = dict(EXPRESSION_OFF, **dict(pairs))  # () = a project saved before v1.4: everything off
+        for key, box in (("curves", self.curves_box), ("phrase_arcs", self.arcs_box),
+                         ("beat_accents", self.beats_box), ("balance", self.balance_box),
+                         ("shepard", self.shepard_box), ("long_doubling", self.long_dbl_box)):
+            box.setChecked(bool(vals[key]))
+        for key, box in (("humanize", self.humanize_box), ("riser", self.riser_box),
+                         ("riser_section", self.riser_section_box)):
+            box.setCurrentIndex(max(0, box.findData(vals[key])))
+
+    def _expression_widgets(self) -> tuple:
+        return (self.swell_box, self.curves_box, self.arcs_box, self.beats_box, self.balance_box, self.long_dbl_box,
+                self.humanize_box, self.riser_box, self.riser_section_box, self.shepard_box)
+
     def _master_and_overrides(self, key: str):
         """The master value (all sections equal) and per-section overrides (only when they differ)."""
         vals = {sec: self.values[sec][key] for sec in SECTIONS}
@@ -713,7 +817,8 @@ class MainWindow(QMainWindow):
         acc, sacc = self._master_and_overrides("accent")
         shape, sshape = self._master_and_overrides("shape")
         fill, sfill = self._master_and_overrides("fill")
-        return dict(dynamics=dyn, section_dynamics=sdyn, pattern=ptn, section_patterns=sptn,
+        swell, sswell = self._master_and_overrides("swell")
+        return dict(swell=swell, section_swells=sswell, **self.expression_values(),dynamics=dyn, section_dynamics=sdyn, pattern=ptn, section_patterns=sptn,
                     note_mode=nm, section_note_modes=snm, accent=acc, section_accents=sacc,
                     instrument_patterns=tuple(sorted(self.ipatterns.items())),
                     part_patterns=tuple(sorted(self.ppatterns.items())), restrike_bars=self.restrike_box.isChecked(),
@@ -756,7 +861,7 @@ class MainWindow(QMainWindow):
                          tuple(tuple(r) for r in self.palts), tuple(self.ptabs),
                          phrase=self.phrase_box.currentData() or 4, emphasis=self.emphasis_box.isChecked(),
                          clear_low=self.clear_low_box.isChecked(), change_accents=self.change_accent_box.isChecked(),
-                         theme=self.theme_box.isChecked())
+                         theme=self.theme_box.isChecked(), expression=self._expression_state())
 
     def record(self, label: str):
         if not self._restoring:
@@ -782,7 +887,8 @@ class MainWindow(QMainWindow):
                        self.character, self.pattern_box, self.top_box, self.keep_box, self.seed, self.tabs,
                        self.restrike_box, self.indep_box, self.mel_inst_box, self.mel_double_box,
                        self.note_mode_box, self.accent_box, self.pattern_tabs, self.shape_box, self.fill_box,
-                       self.phrase_box, self.emphasis_box, self.clear_low_box, self.change_accent_box, self.theme_box)
+                       self.phrase_box, self.emphasis_box, self.clear_low_box, self.change_accent_box, self.theme_box,
+                       *self._expression_widgets())
             for w in blocked:
                 w.blockSignals(True)
             self.mode.setCurrentText(st.mode)
@@ -802,6 +908,7 @@ class MainWindow(QMainWindow):
             self.clear_low_box.setChecked(st.clear_low)
             self.change_accent_box.setChecked(st.change_accents)
             self.theme_box.setChecked(st.theme)
+            self._show_expression(st.expression)
             self.melody_file, self.bass_file = st.melody, st.bass
             self.indep_box.setChecked(st.independent)
             self._fill_melody_instruments(st.mel_inst)
@@ -1137,7 +1244,8 @@ class MainWindow(QMainWindow):
             lab.setText(names[v] + ("  (sections differ)" if mixed else ""))
         differ = []
         for key, box, name in (("note_mode", self.note_mode_box, "Note mode"), ("accent", self.accent_box, "Accents"),
-                               ("shape", self.shape_box, "Shape"), ("fill", self.fill_box, "Fill")):
+                               ("shape", self.shape_box, "Shape"), ("fill", self.fill_box, "Fill"),
+                               ("swell", self.swell_box, "Swell")):
             v, mixed = self._scope_value(key)
             box.blockSignals(True)
             box.setCurrentIndex(box.findData(v))
@@ -1185,10 +1293,11 @@ class MainWindow(QMainWindow):
         where = "" if self.scope == ALL else f" ({self.scope})"
         name = {"character": "Character", "forces": "Forces", "density": "Density", "dynamics": "Dynamics",
                 "pattern": "Pattern", "note_mode": "Note mode", "accent": "Accents", "shape": "Shape",
-                "fill": "Fill"}[key]
+                "fill": "Fill", "swell": "Swell"}[key]
         shown = (pat.PATTERN_NAMES[value] if key == "pattern" else pat.NOTE_MODE_NAMES[value] if key == "note_mode"
                  else pat.ACCENT_NAMES[value] if key == "accent" else shp.SHAPE_NAMES[value] if key == "shape"
-                 else FILL_NAMES[value] if key == "fill" else CHARACTER_NAMES.get(value, value))
+                 else FILL_NAMES[value] if key == "fill" else ex.SWELL_NAMES[value] if key == "swell"
+                 else CHARACTER_NAMES.get(value, value))
         self._show_scope_values()
         if key in RENDER_KEYS:
             self._apply_render()
@@ -1691,19 +1800,40 @@ class MainWindow(QMainWindow):
         if not self.orch:
             return
         ln = self.orch.line(line_id)
-        self.piano.set_part(ln.label, self.orch.part(line_id).notes, self.session.clip.length,
-                            [c.start for c in self.orch.chords], self.name_style, self.key())
+        notes = self.orch.part(line_id).notes
+        groups = ex.split_notes(self.orch.meta, line_id, notes)
+        kinds = {n: k for k in ("trem", "rise") for n in groups[k]}
+        self.piano.set_part(ln.label, notes, self.session.clip.length,
+                            [c.start for c in self.orch.chords], self.name_style, self.key(),
+                            curves=self.orch.curves_for(line_id), cc1=self.orch.cc1_for(line_id), kinds=kinds)
 
     # ------------------------------------------------------------------ playback
     def _load_player(self):
         insts = instruments()
         lines = self.orch.sounding_lines
-        parts = [(ln.id, ln.program if ln.program is not None else insts[ln.instrument].gm_program,
-                  list(self.orch.part(ln.id).notes)) for ln in lines]
+        orch = self.orch
+        hz = orch.settings.humanize
+        parts, controls = [], {}
+        for ln in lines:
+            prog = ln.program if ln.program is not None else insts[ln.instrument].gm_program
+            notes = list(orch.part(ln.id).notes)
+            curve = orch.curves_for(ln.id)
+            if not orch.meta.get("expression") and hz == ex.HUMANIZE_OFF:
+                parts.append((ln.id, prog, notes))  # v1.3 exactly
+                continue
+            groups = ex.split_notes(orch.meta, ln.id, notes)
+            if hz != ex.HUMANIZE_OFF:  # the same offsets as the export
+                groups = {k: ex.humanize(v, ex.humanize_key(orch.seed, pa.alt_name(orch), ln.id, k), hz)
+                          for k, v in groups.items()}
+            parts.append((ln.id, prog, groups[""] + groups["rise"]))
+            if groups["trem"]:
+                parts.append((ln.id + "/trem", ex.TREMOLO_PROGRAM, groups["trem"]))
+            if curve:
+                controls[ln.id] = controls[ln.id + "/trem"] = ex.audition_expression(curve)
         sections = {ln.id: insts[ln.instrument].section for ln in lines}
         self.player.loop = self.loop_box.isChecked()
         self.player.set_bpm(self.tempo.value())
-        self.player.load(parts, self.session.clip.length, sections)
+        self.player.load(parts, self.session.clip.length, sections, controls or None)
         for pid in self.muted:
             if pid in sections:
                 self.player.seq.set_mute(pid, True)
@@ -1795,9 +1925,8 @@ class MainWindow(QMainWindow):
     def files_for_part(self, line_id: str) -> list[Path]:
         if not self.orch:
             return []
-        p = export_part(self.orch, line_id, self.parts_folder(), self.project_name(), self.tempo.value(),
-                        self.session.clip.length)
-        return [p] if p else []
+        return export_part_files(self.orch, line_id, self.parts_folder(), self.project_name(), self.tempo.value(),
+                                 self.session.clip.length)
 
     def files_for_all(self) -> list[Path]:
         """What the All handle drags and Export writes: the export choice (+ combined divisi files)."""
@@ -1891,7 +2020,8 @@ class MainWindow(QMainWindow):
             bass=inp(st.bass), mel_inst=st.mel_inst, mel_double=st.mel_double, independent=st.independent,
             top_voice=st.top_voice, keep=st.keep, seed=st.seed, alts=st.alts, locks=st.locks, tab=st.tab,
             dirty=st.dirty, scope=self.scope, palts=st.palts, ptabs=st.ptabs, phrase=st.phrase,
-            emphasis=st.emphasis, clear_low=st.clear_low, change_accents=st.change_accents, theme=st.theme)
+            emphasis=st.emphasis, clear_low=st.clear_low, change_accents=st.change_accents, theme=st.theme,
+            expression=st.expression)
 
     def save_project(self) -> Path | None:
         """Save to the project's file (asks where the first time). Returns the path, or None if cancelled."""
@@ -1942,7 +2072,8 @@ class MainWindow(QMainWindow):
                        tuple(p.ipatterns), tuple(p.ppatterns), p.restrike, entry(p.melody), entry(p.bass), p.mel_inst,
                        p.mel_double, p.independent, p.top_voice, p.keep, p.seed, tuple(p.alts), tuple(p.locks),
                        p.tab, p.dirty, tuple(tuple(r) for r in p.palts), tuple(p.ptabs), phrase=p.phrase,
-                       emphasis=p.emphasis, clear_low=p.clear_low, change_accents=p.change_accents, theme=p.theme)
+                       emphasis=p.emphasis, clear_low=p.clear_low, change_accents=p.change_accents, theme=p.theme,
+                       expression=tuple(tuple(x) for x in p.expression))
         self.tempo.blockSignals(True)
         self.tempo.setValue(int(round(p.tempo)))
         self.tempo.blockSignals(False)

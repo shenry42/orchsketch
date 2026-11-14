@@ -1,0 +1,10 @@
+{
+  "id": "tremolo",
+  "name": "Tremolo (strings)",
+  "short": "trem",
+  "order": 90,
+  "family": "tremolo",
+  "kind": "sustain",
+  "choir": false,
+  "description": "Notes held for the chord's length, played tremolo: exported as their own part (e.g. Vln1-trem) for a tremolo patch. Strings only; other sections sustain."
+}

@@ -10,6 +10,12 @@ value per part at the start (the part's section Dynamics), and the whole clip le
   * Combined divisi (Milestone 6, optional): one file per instrument that plays on several lines (divisi,
     a2 winds, horns 1-4, melody host), all its lines on one track, {ProjectName}_{Code}-all_{Alt}.mid,
     e.g. NightRise_Hn-all_A.mid. Unisons between its lines are merged so no two notes overlap on one pitch.
+
+v1.4 (Milestone 9, expression.py), all off by default (the files are then byte for byte v1.3's):
+  * CC curves: a part with curves gets its CC1/CC11 breakpoints instead of the one constant CC1.
+  * Tremolo and riser notes go to their own part: {Part}-trem ("Violins I trem") and {Part}-rise
+    ("Violins I riser"), one patch per file; the part's own file keeps the rest. Each has the part's curves.
+  * Humanize: seeded timing/velocity offsets on every file's notes (the same offsets every time).
 """
 from __future__ import annotations
 
@@ -18,10 +24,11 @@ from pathlib import Path
 
 import mido
 
+from . import expression as ex
 from .generator import EXPORT_CODE, Orchestration
 from .pattern_alts import alt_name
 from .instruments import instruments
-from .midi_io import PPQ, Note, write_notes
+from .midi_io import PPQ, Note, note_events, write_notes
 
 PARTS, FULL, BOTH = "parts", "full", "both"
 EXPORT_CHOICES = (PARTS, FULL, BOTH)
@@ -43,16 +50,44 @@ def export_folder(project: str, root: Path | None = None) -> Path:
     return (root or EXPORT_ROOT) / safe_name(project)
 
 
+def part_pieces(orch: Orchestration, line_id: str) -> list[tuple[str, str, list[Note], int | None, list | None]]:
+    """What one part line exports as: (export code, track name, notes, constant CC1 or None, controls or None)
+    for the part itself and (v1.4) its tremolo and riser parts, each only if it has notes."""
+    line = orch.line(line_id)
+    notes = list(orch.part(line_id).notes)
+    if not notes:
+        return []
+    curves = orch.curves_for(line_id)
+    cc1, controls = (None, curves) if curves else (orch.cc1_for(line_id), None)
+    hz = orch.settings.humanize
+    groups = ex.split_notes(orch.meta, line_id, notes)
+    out = []
+    for kind in ex.KINDS:
+        ns = groups[kind]
+        if not ns:
+            continue
+        if hz != ex.HUMANIZE_OFF:
+            ns = ex.humanize(ns, ex.humanize_key(orch.seed, alt_name(orch), line_id, kind), hz)
+        out.append((line.export + ex.KIND_EXPORT.get(kind, ""), line.label + ex.KIND_LABEL.get(kind, ""), ns, cc1,
+                    controls))
+    return out
+
+
+def export_part_files(orch: Orchestration, line_id: str, folder: Path | str, project: str, tempo: float,
+                      length: int) -> list[Path]:
+    """Write one part (and its tremolo and riser parts). Returns the files written (none if it rests)."""
+    out = []
+    for code, name, notes, cc1, controls in part_pieces(orch, line_id):
+        path = Path(folder) / part_filename(project, code, alt_name(orch))
+        out.append(write_notes(path, notes, tempo, track_name=name, length=length, cc1=cc1, controls=controls))
+    return out
+
+
 def export_part(orch: Orchestration, line_id: str, folder: Path | str, project: str, tempo: float,
                 length: int) -> Path | None:
-    """Write one part. Returns the path, or None if the part rests throughout."""
-    line = orch.line(line_id)
-    part = orch.part(line_id)
-    if not part.notes:
-        return None
-    path = Path(folder) / part_filename(project, line.export, alt_name(orch))
-    return write_notes(path, list(part.notes), tempo, track_name=line.label, length=length,
-                       cc1=orch.cc1_for(line_id))
+    """Write one part. Returns the part's own file (the first written), or None if the part rests throughout."""
+    files = export_part_files(orch, line_id, folder, project, tempo, length)
+    return files[0] if files else None
 
 
 def export_parts(orch: Orchestration, folder: Path | str, project: str, tempo: float, length: int,
@@ -62,9 +97,7 @@ def export_parts(orch: Orchestration, folder: Path | str, project: str, tempo: f
     for ln in orch.lines:
         if line_ids is not None and ln.id not in line_ids:
             continue
-        p = export_part(orch, ln.id, folder, project, tempo, length)
-        if p is not None:
-            out.append(p)
+        out += export_part_files(orch, ln.id, folder, project, tempo, length)
     return out
 
 
@@ -106,11 +139,15 @@ def export_full(orch: Orchestration, folder: Path | str, project: str, tempo: fl
     _append_timed(head, [], length)
     mid.tracks.append(head)
     for ln in lines:
-        tr = mido.MidiTrack()
-        tr.append(mido.MetaMessage("track_name", name=ln.label, time=0))
-        tr.append(mido.Message("control_change", control=1, value=orch.cc1_for(ln.id), channel=0, time=0))
-        _append_timed(tr, _track_events(orch.part(ln.id).notes), length)
-        mid.tracks.append(tr)
+        for _, name, notes, cc1, controls in part_pieces(orch, ln.id):
+            tr = mido.MidiTrack()
+            tr.append(mido.MetaMessage("track_name", name=name, time=0))
+            if controls:
+                _append_timed(tr, note_events(notes, 0, controls), length)
+            else:
+                tr.append(mido.Message("control_change", control=1, value=cc1, channel=0, time=0))
+                _append_timed(tr, _track_events(notes), length)
+            mid.tracks.append(tr)
     mid.save(str(path))
     return path
 
@@ -142,11 +179,20 @@ def export_combined(orch: Orchestration, folder: Path | str, project: str, tempo
                     ) -> list[Path]:
     out = []
     for code, ids in combined_groups(orch).items():
-        notes = merge_unisons(n for lid in ids for n in orch.part(lid).notes)
+        # the lines' own notes (tremolo and riser parts have files of their own)
+        notes = merge_unisons(n for lid in ids for n in ex.split_notes(orch.meta, lid, orch.part(lid).notes)[""])
+        if not notes:
+            continue
+        hz = orch.settings.humanize
+        if hz != ex.HUMANIZE_OFF:
+            notes = ex.humanize(notes, ex.humanize_key(orch.seed, alt_name(orch), code), hz)
         name = _group_label(orch, ids)
-        cc1 = max(orch.cc1_for(lid) for lid in ids)
+        loud = max(ids, key=lambda lid: orch.cc1_for(lid))
+        cc1 = orch.cc1_for(loud)
+        controls = orch.curves_for(loud)
         path = Path(folder) / part_filename(project, code, alt_name(orch))
-        out.append(write_notes(path, notes, tempo, track_name=name, length=length, cc1=cc1))
+        out.append(write_notes(path, notes, tempo, track_name=name, length=length,
+                               cc1=None if controls else cc1, controls=controls))
     return out
 
 

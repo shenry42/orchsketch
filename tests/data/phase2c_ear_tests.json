@@ -1,0 +1,120 @@
+{
+  "about": "Milestone 9 (v1.4) ear-test set: scripts\\benchmark.bat builds one project per case in Documents\\OrchSketch\\Projects\\Benchmark\\Phase2c\\. Default preset (Full epic), safe, seed 1, harmony B. Rate each project once, 1-5, in tests/ratings.csv (test = case id, alternative = B). X1-X3, X6 and X7 re-check your v1.3 notes; X4 and X5 are the new expression features. After the first round (tuning): re-rate only X2, X4, X6 and X7. New projects now start with Balance sections and High doubling: long notes only on, so every case has them unless it says otherwise.",
+  "cases": [
+    {
+      "id": "X1",
+      "expected": "11_sixteen_bars.expected.json",
+      "files": false,
+      "tab": "B",
+      "name": "T7 again (Pulse bed) + Balance sections: woodwinds a step under",
+      "sections": {
+        "brass": {
+          "pattern": "stabs_sync"
+        },
+        "woodwinds": {
+          "pattern": "8ths"
+        }
+      },
+      "options": {
+        "shape": "pulse_bed",
+        "emphasis": true,
+        "balance": true
+      }
+    },
+    {
+      "id": "X2",
+      "expected": "11_sixteen_bars.expected.json",
+      "files": false,
+      "tab": "B",
+      "name": "T6 again: Breakdown retuned; woodwinds balanced and fading a step before they drop out (re-rate)",
+      "sections": {},
+      "options": {
+        "shape": "breakdown"
+      }
+    },
+    {
+      "id": "X3",
+      "expected": "11_sixteen_bars.expected.json",
+      "files": true,
+      "tab": "B",
+      "name": "T5 again + High doubling: long notes only (no quick notes in the piccolo)",
+      "sections": {
+        "strings": {
+          "fill": "run"
+        }
+      },
+      "options": {
+        "shape": "phrase4",
+        "emphasis": true,
+        "long_doubling": true
+      }
+    },
+    {
+      "id": "X4",
+      "expected": "11_sixteen_bars.expected.json",
+      "files": true,
+      "tab": "B",
+      "name": "Build and hit + CC curves + swells into phrase downbeats + 2-bar riser (strings); piccolo doubles only long notes now (re-rate)",
+      "sections": {},
+      "options": {
+        "shape": "build_hit",
+        "emphasis": true,
+        "curves": true,
+        "swell": "downbeat",
+        "riser": 2
+      }
+    },
+    {
+      "id": "X5",
+      "expected": "benchmark/B01.expected.json",
+      "files": true,
+      "tab": "B",
+      "name": "Build and hit + 2-bar Shepard riser (three string layers crossfading) + CC curves",
+      "sections": {},
+      "options": {
+        "shape": "build_hit",
+        "emphasis": true,
+        "curves": true,
+        "riser": 2,
+        "shepard": true
+      }
+    },
+    {
+      "id": "X6",
+      "expected": "01_epic_staple.expected.json",
+      "files": false,
+      "tab": "B",
+      "name": "T11 again: theme in octaves + strings tremolo (louder in the audition) + swells into every chord + phrase arcs (re-rate)",
+      "sections": {
+        "strings": {
+          "pattern": "tremolo"
+        }
+      },
+      "options": {
+        "theme": true,
+        "curves": true,
+        "swell": "chord",
+        "phrase_arcs": true
+      }
+    },
+    {
+      "id": "X7",
+      "expected": "01_epic_staple.expected.json",
+      "files": false,
+      "tab": "B",
+      "name": "T9 again: cello wave arpeggio (now a step over the other strings) + stronger beat accents and phrase arcs + light humanize (re-rate)",
+      "sections": {},
+      "options": {
+        "emphasis": true,
+        "beat_accents": true,
+        "phrase_arcs": true,
+        "humanize": "light"
+      },
+      "parts": {
+        "vc": "arp_wave",
+        "vc-a": "arp_wave",
+        "vc-solo": "arp_wave"
+      }
+    }
+  ]
+}

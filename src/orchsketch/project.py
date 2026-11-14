@@ -135,6 +135,7 @@ class Project:
     clear_low: bool = False  # v1.3: clear low register
     change_accents: bool = False  # v1.3: accent chord changes
     theme: bool = False  # v1.3: unison/octave theme
+    expression: tuple = ()  # v1.4: window-wide expression options, (key, value) pairs (EXPRESSION_DEFAULTS)
     extra: dict = field(default_factory=dict)  # room for later versions
 
 

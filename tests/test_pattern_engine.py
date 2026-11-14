@@ -237,6 +237,8 @@ def test_sixteen_bars_with_every_pattern_alternative_is_quick():
     exp = EXPECTED[10]
     chords, key = load(exp)
     st = replace(preset_settings(EPIC), section_note_modes={"strings": pat.HYBRID}, accent="3+3+2")
+    import gc
+    gc.collect()
     t = time.perf_counter()
     alts = generate_all(chords, key, seed=1, settings=st)
     t_harmony = time.perf_counter() - t
@@ -245,7 +247,10 @@ def test_sixteen_bars_with_every_pattern_alternative_is_quick():
         for n in (2, 3):
             assert not must_fix(pa.pattern_alternative(o, n).report)
     t_patterns = time.perf_counter() - t
-    assert t_patterns < max(1.5, 0.6 * t_harmony), (t_harmony, t_patterns)
+    # v1.4: the six pattern alternatives take about 0.6 of the harmony's time when they run cold (Claude's
+    # workspace, v1.3 and v1.4 alike); on a busy PC that reached 0.8 (Sam, 2026-11-13), so the limit is 0.9:
+    # still well under a voicing search, which is what this guards against
+    assert t_patterns < max(1.5, 0.9 * t_harmony), (t_harmony, t_patterns)
 
 
 # ---------------------------------------------------------------- the window and projects

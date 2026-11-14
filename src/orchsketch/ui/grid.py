@@ -266,10 +266,15 @@ class PartGrid(QTableWidget):
 class PianoRoll(QWidget):
     """The selected part's whole line, with bar lines and chord boundaries."""
 
+    LANE = 46  # v1.4: the expression lane under the notes (velocity bars, CC1 and CC11 curves)
+
     def __init__(self):
         super().__init__()
-        self.setMinimumHeight(110)
+        self.setMinimumHeight(160)
         self.notes = []
+        self.curves = None  # [tick, cc, value] breakpoints (v1.4) or None
+        self.cc1 = None  # the constant CC1 when there are no curves
+        self.kinds: dict = {}  # note -> "trem" / "rise" (v1.4)
         self.length = BAR
         self.chord_starts: list[int] = []
         self.title = ""
@@ -277,9 +282,11 @@ class PianoRoll(QWidget):
         self.position: int | None = None
         self.key = None
 
-    def set_part(self, title: str, notes, length: int, chord_starts, name_style="ableton", key=None):
+    def set_part(self, title: str, notes, length: int, chord_starts, name_style="ableton", key=None, curves=None,
+                 cc1=None, kinds=None):
         self.title, self.notes, self.length = title, list(notes), max(length, 1)
         self.chord_starts, self.name_style, self.key = list(chord_starts), name_style, key
+        self.curves, self.cc1, self.kinds = curves, cc1, dict(kinds or {})
         self.update()
 
     def labels(self) -> list[tuple[object, str]]:
@@ -311,6 +318,14 @@ class PianoRoll(QWidget):
                                             "Select a part in the grid to see its line here."))
             return
         p.drawText(8, 14, self.title)
+        legend = "velocity bars · CC1 " + ("curve" if self.curves else f"{self.cc1}" if self.cc1 is not None else "")
+        if self.curves:
+            legend += " · CC11 dashed"
+        if self.kinds:
+            legend += " · tremolo purple · riser orange"
+        p.drawText(int(w - p.fontMetrics().horizontalAdvance(legend) - 8), 14, legend)
+        lane_bottom = bottom
+        bottom = bottom - self.LANE - 4
         lo = min(n.pitch for n in self.notes) - 2
         hi = max(n.pitch for n in self.notes) + 2
         span = max(hi - lo, 1)
@@ -329,10 +344,14 @@ class PianoRoll(QWidget):
             p.drawLine(int(left + t * sx), top, int(left + t * sx), bottom)
         nh = max(3.0, (bottom - top) / span)
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor("#5b9bd5"))
+        colours = {"": "#5b9bd5", "trem": "#a77bd6", "rise": "#e0904a"}
         for n in self.notes:
+            c = QColor(colours.get(self.kinds.get(n, ""), "#5b9bd5"))
+            c.setAlphaF(0.45 + 0.55 * min(1.0, n.velocity / 127))  # louder notes brighter
+            p.setBrush(c)
             p.drawRoundedRect(QRectF(left + n.start * sx + 1, y(n.pitch) - nh / 2, max(2.0, n.length * sx - 2), nh),
                               2, 2)
+        self._paint_lane(p, left, sx, lane_bottom - self.LANE, lane_bottom)
         # note names (v1.0): on the note when it is tall enough, else just above it; never overlapping
         font = p.font()
         font.setPointSizeF(max(7.0, font.pointSizeF() - 1.5))
@@ -352,4 +371,36 @@ class PianoRoll(QWidget):
         if self.position is not None:
             p.setPen(QPen(QColor("#e6e6e6"), 1))
             x = int(left + self.position * sx)
-            p.drawLine(x, top, x, bottom)
+            p.drawLine(x, top, x, lane_bottom)
+
+    def _paint_lane(self, p, left, sx, y0, y1):
+        """v1.4: velocity bars per note, and the CC1 (solid) / CC11 (dashed) curve, 0-127 bottom to top."""
+        w = self.width()
+        p.fillRect(QRectF(left, y0, w - left - 8, y1 - y0), QColor("#222428"))
+        p.setPen(QColor(MUTED))
+        p.drawText(4, int(y0 + 12), "vel/CC")
+
+        def vy(v):
+            return y1 - (y1 - y0) * v / 127
+
+        p.setPen(QPen(QColor("#7f8c99"), 2))
+        for n in self.notes:
+            x = left + n.start * sx + 1
+            p.drawLine(QPointF(x, y1), QPointF(x, vy(n.velocity)))
+        x_end = left + self.length * sx
+        if self.curves:
+            for cc, pen in ((1, QPen(QColor("#f0b44c"), 2)), (11, QPen(QColor("#6cc58c"), 1, Qt.DashLine))):
+                pts = [(t, v) for t, c, v in self.curves if c == cc]
+                if not pts:
+                    continue
+                p.setPen(pen)
+                prev = None
+                for t, v in pts + [(self.length, pts[-1][1])]:
+                    pt = QPointF(left + t * sx, vy(v))
+                    if prev is not None:
+                        p.drawLine(prev, QPointF(pt.x(), prev.y()))  # a value holds until the next one
+                        p.drawLine(QPointF(pt.x(), prev.y()), pt)
+                    prev = pt
+        elif self.cc1 is not None:
+            p.setPen(QPen(QColor("#f0b44c"), 2))
+            p.drawLine(QPointF(left, vy(self.cc1)), QPointF(x_end, vy(self.cc1)))

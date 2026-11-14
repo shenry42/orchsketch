@@ -7,17 +7,15 @@
     {},
     {
       "sections": 2,
-      "density": -2,
-      "dynamics": -1,
-      "forces": -1
+      "density": -1,
+      "dynamics": -1
     },
     {
       "sections": 2,
-      "density": -2,
-      "dynamics": -1,
-      "forces": -1
+      "density": -1,
+      "dynamics": -1
     },
     {}
   ],
-  "description": "Strips to the first two sections (strings and brass where they play), thinner and a step softer, in the middle of the clip, then returns."
+  "description": "Strips to the first two sections (strings and brass where they play), one Density step thinner and a step softer, in the middle of the clip, then returns. (v1.4: Density -1 instead of -2, divisi kept, so the break isn't thin.)"
 }

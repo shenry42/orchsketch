@@ -1,0 +1,9 @@
+{
+  "about": "Balance sections (v1.4): dynamic steps added to a section's Dynamics when the option is on, for velocity and CC1. At the same marking woodwinds sound over strings (Sam's Pulse bed ear test), so they sit a step under.",
+  "steps": {
+    "strings": 0,
+    "brass": 0,
+    "woodwinds": -1,
+    "choir": 0
+  }
+}

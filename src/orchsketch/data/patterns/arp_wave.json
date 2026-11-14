@@ -1,0 +1,27 @@
+{
+  "id": "arp_wave",
+  "name": "Root-5th-octave-10th wave (8ths, 3+3+2)",
+  "short": "wave",
+  "order": 46,
+  "family": "arp_wave",
+  "kind": "grid",
+  "step": "8th",
+  "accents": [
+    0,
+    6,
+    12
+  ],
+  "contour": [
+    0,
+    5,
+    8,
+    10,
+    8,
+    5
+  ],
+  "degrees": true,
+  "note_mode": "chord",
+  "end_on_anchor": true,
+  "down": "half_time",
+  "description": "Up root-5th-octave-10th and back down in 8ths: the six-note wave runs across the bar line against the 3+3+2 accents, so it doesn't repeat bar by bar (v1.4)."
+}

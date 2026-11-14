@@ -37,6 +37,7 @@ from .analysis.chords import QUALITIES, ChordLabel
 from .checker import ChordSpan, Issue, Part, Report, check, required_tones
 from .instruments import SECTIONS, Instrument, instruments as builtin_instruments
 from . import shapes as shp
+from . import expression as ex
 from .midi_io import BAR, PPQ, TOLERANCE, Note, position_text
 from .rules import MODERATE, SAFE, WARNING, Rules, rules as builtin_rules
 from .theory import Key, note_name
@@ -332,11 +333,23 @@ class Settings:
     clear_low: bool = False  # grid patterns below C3 one level simpler (keeps the low register from blurring)
     change_accents: bool = False  # the first note at every chord change accented
     theme: bool = False  # unison/octave theme: melody (or top voice) in octaves across horns, low brass, cellos, choir
+    # v1.4 (Milestone 9, expression); every default reproduces v1.3
+    curves: bool = False  # CC1/CC11 curves per part instead of one constant CC1 (expression.py)
+    swell: str = ex.SWELL_OFF  # swells into the next chord / phrase downbeat (turns curves on for the section)
+    section_swells: tuple = ()  # (section, swell) pairs
+    phrase_arcs: bool = False  # velocity: rise toward the middle of every phrase
+    beat_accents: bool = False  # velocity: beat 1 strongest, then 3, then 2 and 4, off-beats softest
+    balance: bool = False  # data/balance.json: woodwinds a dynamic step under the others
+    humanize: str = ex.HUMANIZE_OFF  # seeded timing/velocity offsets at export and audition only
+    riser: int = 0  # riser length in bars (0 = none) into the shape's hit, else into the last chord
+    riser_section: str = "strings"  # strings or woodwinds
+    shepard: bool = False  # the riser in three layers an octave apart, crossfaded on CC11
+    long_doubling: bool = False  # a melody doubling at C6 or above doubles only notes of a quarter or longer
 
     def __post_init__(self):
         for f in ("section_dynamics", "section_character", "section_patterns", "instrument_patterns",
                   "part_patterns", "section_note_modes", "section_accents", "part_variants", "section_shapes",
-                  "section_fills"):
+                  "section_fills", "section_swells"):
             object.__setattr__(self, f, _pairs(getattr(self, f)))
         if self.dynamics not in DYNAMICS or any(d not in DYNAMICS for _, d in self.section_dynamics):
             raise ValueError("dynamics must be one of " + " ".join(DYNAMICS))
@@ -359,6 +372,12 @@ class Settings:
             raise ValueError("phrase must be 2, 4 or 8 bars")
         if self.fill not in FILLS or any(x not in FILLS for _, x in self.section_fills):
             raise ValueError("fill must be one of " + " ".join(FILLS))
+        if self.swell not in ex.SWELLS or any(x not in ex.SWELLS for _, x in self.section_swells):
+            raise ValueError("swell must be one of " + " ".join(ex.SWELLS))
+        if self.humanize not in ex.HUMANIZE:
+            raise ValueError("humanize must be one of " + " ".join(ex.HUMANIZE))
+        if self.riser not in ex.RISER_BARS or self.riser_section not in ex.RISER_SECTIONS:
+            raise ValueError("riser is 0, 1, 2 or 4 bars in the strings or woodwinds")
         if self.melody_double not in DOUBLINGS:
             raise ValueError(f"melody doubling must be one of {DOUBLINGS}")
         for f in ("melody", "bass"):
@@ -373,8 +392,19 @@ class Settings:
     def dynamics_for(self, section: str) -> str:
         return dict(self.section_dynamics).get(section, self.dynamics)
 
+    def level_for(self, section: str) -> int:
+        """The section's dynamic step (index into DYNAMIC_STEPS), Balance included (v1.4)."""
+        k = DYNAMIC_STEPS.index(self.dynamics_for(section)) + ex.balance_step(section, self.balance)
+        return max(0, min(len(DYNAMIC_STEPS) - 1, k))
+
     def velocity_for(self, section: str) -> int:
-        return DYNAMICS[self.dynamics_for(section)]
+        return DYNAMICS[DYNAMIC_STEPS[self.level_for(section)]]
+
+    def swell_for(self, section: str) -> str:
+        return dict(self.section_swells).get(section, self.swell)
+
+    def curves_on(self, sections=SECTIONS) -> bool:
+        return self.curves or any(self.swell_for(s) != ex.SWELL_OFF for s in sections)
 
     def character_for(self, section: str) -> str:
         return dict(self.section_character).get(section, self.character)
@@ -458,8 +488,12 @@ class Orchestration:
         return builtin_instruments()[self.line(line_id).instrument].section
 
     def cc1_for(self, line_id: str) -> int:
-        """The part's constant CC1 value (its section's Dynamics; SPEC §6)."""
+        """The part's constant CC1 value (its section's Dynamics, Balance included; SPEC §6)."""
         return self.settings.velocity_for(self.section_of(line_id))
+
+    def curves_for(self, line_id: str):
+        """The part's CC1/CC11 breakpoints [tick, cc, value] (v1.4), or None (one constant CC1)."""
+        return ex.curves_of(self.meta, line_id)
 
     @property
     def figures(self) -> dict:
@@ -1967,6 +2001,11 @@ def _finish(approach, key, seed, spans, lines, cells, meta, settings: Settings, 
             break
         new = (bad | {c - 1 for c in bad if c > 0}) - unmask
         unmask |= new or set(range(len(spans)))  # nothing new to try: every chord plays as set
+    expr = {k: info[k] for k in ("curves", "trem", "rise") if info.get(k)}
+    if expr:
+        meta = dict(meta, expression=expr)
+    elif "expression" in meta:
+        meta = {k: v for k, v in meta.items() if k != "expression"}
     if reason is None:
         reason = _reason(APPROACH[approach], lines, cells, insts, settings, meta, spans, key)
     vel = settings.velocity
@@ -2035,6 +2074,74 @@ def _render(lines: list[Line], spans: list[ChordSpan], cells, labels, settings: 
             figures: dict[str, list[Figure | None]], key: Key, rules: Rules, insts, mode: str,
             approach: str = "A", fixed: frozenset = frozenset(), unmask: frozenset = frozenset(),
             info: dict | None = None) -> list[Part]:
+    """The parts with their real notes (_render_notes), then (v1.4) velocity shaping and CC curves. Velocity
+    shaping changes velocities only and curves are kept in `info["curves"]`, so the checker sees exactly what
+    it saw before."""
+    info = info if info is not None else {}
+    parts = _render_notes(lines, spans, cells, labels, settings, figures, key, rules, insts, mode, approach, fixed,
+                          unmask, info)
+    if settings.phrase_arcs or settings.beat_accents:
+        parts = [replace(p, notes=tuple(ex.shape_velocities(p.notes, settings.phrase, settings.phrase_arcs,
+                                                              settings.beat_accents))) for p in parts]
+    sec = {ln.id: insts[ln.instrument].section for ln in lines}
+    rise = info.get("rise") or {}
+    if settings.curves_on(set(sec.values())) or rise:  # a riser always has its own curve (its crescendo, Shepard)
+        only = None if settings.curves_on(set(sec.values())) else set(rise)
+        info["curves"] = _curves(lines, parts, spans, settings, sec, fixed | set(figures), rise, only)
+    return parts
+
+
+def _in_step(st, section: str, present: list[str]) -> bool:
+    """The section plays at this shape step (the step's `sections` count keeps it)."""
+    return st.sections is None or (section in present and present.index(section) < st.sections)
+
+
+def _leaving(steps: list, section: str, present: list[str], b: int) -> bool:
+    """A shape takes the section out after bar b (v1.4: it fades over bar b)."""
+    return b + 1 < len(steps) and _in_step(steps[b], section, present) and not _in_step(steps[b + 1], section,
+                                                                                         present)
+
+
+def _curves(lines: list[Line], parts: list[Part], spans, settings: Settings, sec: dict, fixed: set,
+            rise: dict, only: set | None = None) -> dict:
+    """CC1/CC11 breakpoints per sounding part (expression.curve): the part's level per bar is its section's
+    Dynamics (Balance included) plus the intensity shape's dynamics step for that bar, as for velocity."""
+    end = max(sp.end for sp in spans)
+    nbars = -(-end // BAR)
+    secs = sorted(set(sec.values()))
+    steps = {s: shp.bar_steps(settings.shape_for(s), nbars, settings.phrase) for s in secs}
+    free_secs = {sec[ln.id] for ln in lines if ln.id not in fixed}
+    present = [s for s in shp.SECTION_ORDER if s in free_secs] or list(shp.SECTION_ORDER)
+    bounds = [(sp.start, sp.end) for sp in spans]
+    by_part = {p.id: p for p in parts}
+    out = {}
+    for ln in lines:
+        p = by_part.get(ln.id)
+        if p is None or not p.notes or (only is not None and ln.id not in only):
+            continue
+        s = sec[ln.id]
+        values = []
+        for b in range(nbars):
+            k = settings.level_for(s)
+            if ln.id not in fixed:
+                st = steps[s][b]
+                k += st.dynamics
+                if st.entering and st.sections is not None and s in present and \
+                        present.index(s) == min(st.sections, len(present)) - 1:
+                    k += st.entering
+            values.append(DYNAMICS[DYNAMIC_STEPS[max(0, min(len(DYNAMIC_STEPS) - 1, k))]])
+        r = rise.get(ln.id)
+        tapers = [] if ln.id in fixed else [(b * BAR, (b + 1) * BAR) for b in range(nbars)
+                                             if _leaving(steps[s], s, present, b)]
+        out[ln.id] = ex.curve(values, s, p.notes, bounds, end, settings.phrase, settings.swell_for(s),
+                              tuple(r) if r else None, tapers)
+    return out
+
+
+def _render_notes(lines: list[Line], spans: list[ChordSpan], cells, labels, settings: Settings,
+                  figures: dict[str, list[Figure | None]], key: Key, rules: Rules, insts, mode: str,
+                  approach: str = "A", fixed: frozenset = frozenset(), unmask: frozenset = frozenset(),
+                  info: dict | None = None) -> list[Part]:
     """Checker parts with their real notes: rhythm patterns (SPEC §5c, §14), the melody and bass files' rhythm,
     per-section velocity and re-strike every bar, and (v1.3) intensity shapes, phrase-end fills, anticipations,
     pattern emphasis, a clear low register and accents on chord changes.
@@ -2069,6 +2176,8 @@ def _render(lines: list[Line], spans: list[ChordSpan], cells, labels, settings: 
         if ln.id in figures:
             continue  # the melody and bass-file lines keep the file's rhythm
         pt = settings.pattern_for(ln.id, sec[ln.id], ln.instrument)
+        if pt == ex.TREMOLO and sec[ln.id] != "strings":
+            pt = pat.SUSTAIN  # tremolo is a strings technique (v1.4)
         want[ln.id] = pt if pat.allowed(pt, sec[ln.id] == "choir") else pat.SUSTAIN
     lib = pat.library()
     free_lines = {lid for lid in want if lid not in fixed}
@@ -2116,7 +2225,7 @@ def _render(lines: list[Line], spans: list[ChordSpan], cells, labels, settings: 
                                          any(pt != pat.SUSTAIN for i in range(n) if cells[lid][i] is not None
                                              for _, _, pt in pieces_c(lid, i)))]
     uniform = len(set(vel.values())) <= 1 and (not vel or next(iter(vel.values())) == settings.velocity)
-    extras_on = shaped_on or fills or emphasis or settings.change_accents
+    extras_on = shaped_on or fills or emphasis or settings.change_accents or settings.riser
     if not patterned and not figures and not settings.restrike_bars and uniform and not extras_on:
         return build_parts(lines, spans, cells, labels, settings.velocity, insts, tie)  # exactly Milestone 4
     by_id = {ln.id: ln for ln in lines}
@@ -2142,19 +2251,26 @@ def _render(lines: list[Line], spans: list[ChordSpan], cells, labels, settings: 
     present = [s for s in shp.SECTION_ORDER if any(sec[lid] == s for lid in free_lines)] or list(shp.SECTION_ORDER)
     any_pattern = bool(patterned)
 
+    own_pattern = dict(settings.part_patterns)
+
     def velocity(lid: str, tick: int, pt: str | None) -> int:
         if not (shaped_on or emphasis):
             return vel[lid]
-        k = DYNAMIC_STEPS.index(settings.dynamics_for(sec[lid]))
+        k = settings.level_for(sec[lid])
         if shaped_on and lid not in fixed:
-            st = steps[sec[lid]][min(tick // BAR, nbars - 1)]
+            b = min(tick // BAR, nbars - 1)
+            st = steps[sec[lid]][b]
             k += st.dynamics
             if st.entering and st.sections is not None and present.index(sec[lid]) == min(st.sections,
                                                                                             len(present)) - 1:
                 k += st.entering  # the section that just came in (Pulse bed)
+            if _leaving(steps[sec[lid]], sec[lid], present, b):
+                k -= 1  # v1.4: a section a shape takes out next bar fades a step first (Breakdown)
         if emphasis and pt is not None:
             if pt != pat.SUSTAIN:
                 k += 1
+                if own_pattern.get(lid) == pt:
+                    k += 1  # v1.4: a part given its own pattern (e.g. a cello arpeggio) stands out a step more
             elif any_pattern:
                 k -= 1
         return DYNAMICS[DYNAMIC_STEPS[max(0, min(len(DYNAMIC_STEPS) - 1, k))]]
@@ -2197,7 +2313,10 @@ def _render(lines: list[Line], spans: list[ChordSpan], cells, labels, settings: 
         span = spans[i]
         if lid in figures:
             v = velocity(lid, span.start, None)
-            return figure_notes(p, figures[lid][i], span, v)
+            ns = figure_notes(p, figures[lid][i], span, v)
+            if settings.long_doubling and lid == DOUBLE_ID:  # v1.4: short notes stay out of a high doubling
+                ns = [x for x in ns if x.pitch < LONG_DOUBLING_FLOOR or x.end - x.start >= PPQ]
+            return ns
         if plain or lid not in level or level[lid][i] == 0:
             v = velocity(lid, span.start, pat.SUSTAIN)
             out = [Note(p, span.start, span.end, v)]
@@ -2377,7 +2496,105 @@ def _render(lines: list[Line], spans: list[ChordSpan], cells, labels, settings: 
     if fills:
         _fills(merged, fills, lines, spans, cells, labels, settings, sec, free_lines, masked, oks, key, free,
                (rules, insts, mode))
+    if settings.riser:
+        info["rise"] = _riser(merged, settings, lines, spans, cells, sec, free_lines, oks, key, free,
+                              (rules, insts, mode), steps, nbars)
+    trem: dict[str, list[list[int]]] = {}
+    for lid in patterned:
+        for i in range(n):
+            if cells[lid][i] is None or i in masked.get(lid, ()) or level[lid][i] == 0:
+                continue
+            for s, e, pt in pieces_c(lid, i):
+                if pt != ex.TREMOLO:
+                    continue
+                spans_l = trem.setdefault(lid, [])
+                if spans_l and spans_l[-1][1] == s:
+                    spans_l[-1][1] = e
+                else:
+                    spans_l.append([s, e])
+    if trem:
+        info["trem"] = trem
     return build_parts(lines, spans, cells, labels, settings.velocity, insts, tie, notes=merged, free=free)
+
+
+LONG_DOUBLING_FLOOR = 84  # C6: "long notes only" applies to doubling notes at or above it (v1.4)
+RISER_INSTRUMENTS = {"strings": ("violins_1", "violins_2", "violas"), "woodwinds": ("flute", "clarinet", "bassoon")}
+RISER_NOTES = {1: (8, PPQ // 2, 5), 2: (8, PPQ, 7), 4: (16, PPQ, 10)}  # bars -> (notes, note length, scale steps)
+
+
+def _riser(merged: dict, settings: Settings, lines: list[Line], spans, cells, sec: dict, free_lines: set, oks: dict,
+           key: Key, free: dict, ctx, steps: dict, nbars: int) -> dict:
+    """A riser (v1.4): a line rising by scale steps over 1, 2 or 4 bars into a hit, landing on the line's own
+    chord tone on the beat. The hit is the riser section's first shape hit (Build and hit), else the last
+    chord. Plain: the first riser instrument's top line, doubled by the second's. Shepard: three layers (one
+    per riser instrument), crossfaded on CC11 (expression.curve). Riser notes are checked for range only
+    (SPEC §14 endpoints rule: every note in its chord's scale, the last beat in the target chord's scale);
+    the rest of the texture must stay clean without them, else the riser is left out (top layer alone first).
+    Returns {line id: [start, end, layer, layers]}."""
+    rsec = settings.riser_section
+    st = steps.get(rsec)
+    hit = next((b for b in range(nbars) if st[b].hit), None) if st else None
+    target = hit * BAR if hit else (spans[-1].start if len(spans) > 1 else 0)
+    bars = min(settings.riser, target // BAR)
+    while bars and bars not in RISER_NOTES:
+        bars -= 1
+    j = next((k for k, sp in enumerate(spans) if sp.start <= target < sp.end), None)
+    if not bars or j is None:
+        return {}
+    a = target - bars * BAR
+    count, length, nsteps = RISER_NOTES[bars]
+    by_id = {ln.id: ln for ln in lines}
+    layers = []
+    for inst in RISER_INSTRUMENTS[rsec]:
+        cands = [lid for lid in free_lines if by_id[lid].instrument == inst and cells[lid][j] is not None]
+        if cands:
+            layers.append(max(cands, key=lambda lid: cells[lid][j]))
+    layers = layers if settings.shepard else layers[:2]
+    if not layers:
+        return {}
+    starts = [a + k * length for k in range(count)]
+    chord_at = [next(k for k, sp in enumerate(spans) if sp.start <= t < sp.end) for t in starts]
+    scales = [pat.chord_scale(spans[c].label.pcs() | {spans[c].label.bass}, key) for c in chord_at]
+    last_beat = target - PPQ
+    target_scale = pat.chord_scale(spans[j].label.pcs() | {spans[j].label.bass}, key)
+    scales = [target_scale if t >= last_beat else sc for t, sc in zip(starts, scales)]
+    lines_notes = {}
+    for lid in layers:
+        ps = None
+        for k in range(nsteps, 2, -1):  # a shorter climb where the full one would leave the range
+            ps = ex.riser_pitches(cells[lid][j], count, k, scales, oks[lid], pat.step_pitch)
+            if ps is not None:
+                break
+        if ps is None:
+            continue
+        base = settings.velocity_for(sec[lid])
+        notes: list[Note] = []
+        for k, (t, q) in enumerate(zip(starts, ps)):
+            v = ex.clamp(max(30, base - 30) + (min(127, base + 15) - max(30, base - 30)) * k / max(1, count - 1))
+            if notes and notes[-1].pitch == q:
+                notes[-1] = Note(q, notes[-1].start, t + length, notes[-1].velocity)
+            else:
+                notes.append(Note(q, t, t + length, v))
+        lines_notes[lid] = notes
+    if not lines_notes:
+        return {}
+    tries = [list(lines_notes)]
+    if len(lines_notes) > 1:
+        tries.append(list(lines_notes)[:1])
+    for use in tries:
+        new = {lid: sorted(_cut(merged[lid], a, target) + lines_notes[lid], key=lambda x: x.start) for lid in use}
+        ok = all(_run_window_ok(merged, new, max(a, sp.start), min(target, sp.end), sp, lines, ctx, key)
+                 for sp in spans if sp.start < target and sp.end > a)
+        if not ok:
+            continue
+        nl = len(use) if settings.shepard else 1
+        out = {}
+        for k, lid in enumerate(use):
+            merged[lid] = new[lid]
+            free.setdefault(lid, []).append((a, target))
+            out[lid] = [a, target, k if settings.shepard else 0, nl]
+        return out
+    return {}
 
 
 HIT_PATTERN = "hit_downbeat"
@@ -2570,7 +2787,8 @@ def rerender(orch: Orchestration, settings: Settings, rules=None, instruments=No
 RENDER_ONLY = ("dynamics", "section_dynamics", "pattern", "section_patterns", "instrument_patterns", "part_patterns",
                "restrike_bars", "note_mode", "section_note_modes", "accent", "section_accents", "part_variants",
                "shape", "section_shapes", "phrase", "fill", "section_fills", "pattern_emphasis", "clear_low",
-               "change_accents")
+               "change_accents", "curves", "swell", "section_swells", "phrase_arcs", "beat_accents", "balance",
+               "humanize", "riser", "riser_section", "shepard", "long_doubling")
 
 
 def swap_leaps(orch: Orchestration, rules=None, instruments=None) -> list[Issue]:

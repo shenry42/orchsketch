@@ -6,6 +6,10 @@ Qt timer and talks to a backend (FluidSynth in the app, a fake in tests).
 General MIDI has 16 channels (channel 10 is drums), so parts share a channel per GM program. Mute and
 solo work per part by filtering notes, and a reference count per (channel, pitch) keeps unison
 doublings on one program from cutting each other off.
+
+v1.4: a part id "x/trem" (a part's tremolo notes, on GM Tremolo Strings) is muted and soloed with part "x".
+Expression: each channel's CC11 follows the curve of the first part on it that has one (expression.py,
+audition_expression); every channel starts at CC11 127.
 """
 from __future__ import annotations
 
@@ -33,6 +37,7 @@ class Backend:
     def program(self, channel: int, program: int): ...
     def noteon(self, channel: int, pitch: int, velocity: int): ...
     def noteoff(self, channel: int, pitch: int): ...
+    def cc(self, channel: int, control: int, value: int): ...
     def close(self): ...
 
 
@@ -49,6 +54,9 @@ class FluidBackend(Backend):
 
     def noteoff(self, channel, pitch):
         self.fs.noteoff(channel, pitch)
+
+    def cc(self, channel, control, value):
+        self.fs.cc(channel, control, value)
 
     def close(self):
         self.fs.delete()
@@ -68,8 +76,9 @@ class Sequence:
     """Note events for a set of parts, with mute/solo, sent to a backend as time advances."""
 
     def __init__(self, backend: Backend, parts: list[tuple[str, int, list]], length: int,
-                 sections: dict[str, str] | None = None):
-        """parts: (part id, GM program, notes). sections: part id -> section name (for section solo)."""
+                 sections: dict[str, str] | None = None, controls: dict[str, list] | None = None):
+        """parts: (part id, GM program, notes). sections: part id -> section name (for section solo).
+        controls (v1.4): part id -> [(tick, CC11 value)] for the audition's expression."""
         self.backend = backend
         self.length = length
         self.sections = sections or {}
@@ -86,6 +95,22 @@ class Sequence:
                     ev.append(Event(min(n.end, length), False, pid, n.pitch, 0))
         ev.sort(key=lambda e: (e.tick, e.on, e.part, e.pitch))  # offs before ons at the same tick
         self.events = ev
+        self._cc = getattr(backend, "cc", None)
+        self.cc_events: list[tuple[int, int, int]] = []  # (tick, channel, CC11)
+        if self._cc is not None:
+            done: set[int] = set()
+            for pid, _, _ in parts:
+                ch = self.part_channel[pid]
+                if ch in done or not (controls or {}).get(pid):
+                    continue
+                done.add(ch)
+                self.cc_events += [(t, ch, v) for t, v in controls[pid] if t < length]
+            self.cc_events.sort()
+            from ..expression import AUDITION_VOLUME  # noqa: PLC0415
+            for prog, ch in self.channels.items():
+                self._cc(ch, 11, 127)
+                self._cc(ch, 7, AUDITION_VOLUME.get(prog, 100))  # GM default 100; tremolo strings louder
+        self._ci = 0
         self.muted: set[str] = set()
         self.soloed: set[str] = set()
         self.pos = 0  # tick
@@ -95,6 +120,7 @@ class Sequence:
 
     # --- mute / solo
     def audible(self, part: str) -> bool:
+        part = part.split("/", 1)[0]  # "x/trem" follows part x
         if self.soloed:
             return part in self.soloed and part not in self.muted
         return part not in self.muted
@@ -154,6 +180,10 @@ class Sequence:
     # --- time
     def advance_to(self, tick: int):
         """Send every event up to (not including) `tick`."""
+        while self._ci < len(self.cc_events) and self.cc_events[self._ci][0] < tick:
+            t, ch, v = self.cc_events[self._ci]
+            self._ci += 1
+            self._cc(ch, 11, v)
         while self._i < len(self.events) and self.events[self._i].tick < tick:
             e = self.events[self._i]
             self._i += 1
@@ -170,6 +200,9 @@ class Sequence:
         self._i = 0
         while self._i < len(self.events) and self.events[self._i].tick < tick:
             self._i += 1
+        self._ci = 0
+        while self._ci < len(self.cc_events) and self.cc_events[self._ci][0] < tick:
+            self._ci += 1
 
     def sounding(self) -> dict[str, set[int]]:
         return {k: set(v) for k, v in self._sounding.items() if v}
@@ -217,10 +250,10 @@ class Player:
             self.backend = self.backend_factory()
         return self.backend
 
-    def load(self, parts, length, sections=None):
+    def load(self, parts, length, sections=None, controls=None):
         was = self.playing
         self.stop()
-        self.seq = Sequence(self.ensure_backend(), parts, length, sections)
+        self.seq = Sequence(self.ensure_backend(), parts, length, sections, controls)
         if was:
             self.play()
 

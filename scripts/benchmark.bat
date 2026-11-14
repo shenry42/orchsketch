@@ -1,7 +1,7 @@
 @echo off
 REM SPEC 8 second benchmark: builds the ear-test projects for your own progressions (tests\data\benchmark\)
 REM in Documents\OrchSketch\Projects\Benchmark\, plus the Phase 2 ear-test sets (SPEC 14) in Benchmark\Phase2\
-REM and (v1.3, Milestone 8) Benchmark\Phase2b\,
+REM and (v1.3, Milestone 8) Benchmark\Phase2b\, and (v1.4, Milestone 9) Benchmark\Phase2c\,
 REM and checks the automatic pass/fail rules. Report: benchmark_report.txt (with generation times)
 cd /d "%~dp0.."
 set "QT_QPA_PLATFORM=offscreen"
